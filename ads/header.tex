@@ -23,7 +23,7 @@
 	headinclude=false,	% Kopfzeile nicht in den Satzspiegel einbeziehen
 	footinclude=false,	% Fußzeile nicht in den Satzspiegel einbeziehen
 	listof=totoc,		% Abbildungs-/ Tabellenverzeichnis im Inhaltsverzeichnis darstellen
-	toc=bibliography,	% Literaturverzeichnis im Inhaltsverzeichnis darstellen
+	toc=aphy,	% Literaturverzeichnis im Inhaltsverzeichnis darstellen
 ]{scrreprt}	% Koma-Script report-Klasse, fuer laengere Bachelorarbeiten alternativ auch: scrbook
 
 % Einstellungen laden
@@ -78,7 +78,7 @@
 \usepackage[printonlyused]{acronym} % falls gewünscht kann die Option footnote eingefügt werden, dann wird die Erklärung nicht inline sondern in einer Fußnote dargestellt
 \usepackage{listings}
 \usepackage{fancyhdr}
-\usepackage{minted}
+\usepackage[cache=false]{minted}
 
 % Notizen. Einsatz mit \todo{Notiz} oder \todo[inline]{Notiz}. 
 \usepackage[obeyFinal,backgroundcolor=yellow,linecolor=black]{todonotes}
