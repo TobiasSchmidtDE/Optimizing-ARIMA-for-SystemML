@@ -1,0 +1,98 @@
+%%**************************************************************
+%% Vorlage fuer Praxisarbeiten (o.ä.) der DHBW
+%%
+%% Autor: Tobias Dreher, Yves Fischer
+%% Datum: 06.07.2011
+%%
+%% Autor: Michael Gruben
+%% Datum: 15.05.2013
+%%
+%% Autor: Markus Barthel
+%% Datum: 22.08.2014
+%%
+%%Autor: Pascal Schröder
+%%Datum: 27.03.2017
+%%**************************************************************
+
+\input{ads/header}
+
+\begin{document}
+   
+	% Deckblatt
+	\begin{spacing}{1}
+		\input{ads/deckblatt}
+	\end{spacing}
+
+	\pagestyle{fancyplain}
+	\fancyhf{}
+	\fancyhead[L]{\includegraphics[height=0.8cm]{images/logo.png}}
+	\fancyhead[R]{\includegraphics[height=0.8cm]{images/dhbw.png}}
+	\renewcommand{\headrulewidth}{0pt}
+
+% Erklärung
+	% \input{ads/sperrvermerk}
+	\newpage
+
+	% Inhaltsverzeichnis
+	\begin{spacing}{1.1}
+		\begingroup
+			
+			\setcounter{tocdepth}{1}
+			%für die Anzeige von Unterkapiteln im Inhaltsverzeichnis
+			%\setcounter{tocdepth}{2}
+			
+			\tableofcontents
+			\clearpage
+		\endgroup
+	\end{spacing}
+	\newpage
+
+		\fancyfoot[C]{\thepage}
+
+	\pagenumbering{Roman}
+
+	\RedeclareSectionCommand[beforeskip=\kapitelabstand         ]{chapter} % stellt Abstand vor Kapitelüberschriften ein
+	
+	% Erklärung
+	\input{ads/erklaerung}
+	\newpage
+	
+	% Abstract
+	\input{ads/abstractEN}
+	\newpage
+	
+	\input{ads/abstractDE}
+	\newpage
+	
+	\pagenumbering{arabic}
+	
+	% Inhalt
+	\foreach \i in {01,02,03,04,05,06,07,08,09,...,99} {%
+		\edef\FileName{content/\i kapitel}%
+			\IfFileExists{\FileName}{%
+				\input{\FileName}
+			}
+			{%
+				%file does not exist
+			}
+	}
+
+	\clearpage
+
+	\pagenumbering{Roman}
+	\setcounter{page}{4}
+	\appendix
+	
+	% Anhang
+	\cleardoublepage
+	\input{ads/appendix}
+	
+	% Abkürzungsverzeichnis
+	\cleardoublepage
+	\input{ads/acronym}
+	
+	% Literaturverzeichnis
+	\cleardoublepage
+	\printbibliography
+	
+\end{document}

@@ -1,0 +1,683 @@
+%!TEX root = ../dokumentation.tex
+\chapter{Methodology}\label{methodology}
+
+The goal of this research project is to optimize the \acl{ARIMA} training process, which can essentially be divided into two components: The optimization algorithm and the scoring function.
+If one wished to optimize the overall process one can either choose to improve the performance of the optimization algorithm or the performance of the scoring function. When only concentrating on one of these it is generally a better idea to improve the performance of the scoring function first, as it is usually easier. One might think that it would also be more efficient performance-wise to start with the scoring function, because its impact on the overall training algorithm might be greater. For example consider, that the complexity of both the optimization algorithm and the scoring function is $O(n^3)$. But for the optimization function $O(n^3)$ refers to the function calls of the scoring function and for the scoring function the measure refers to the number of multiplication operations. Then the complexity of the training algorithm in terms of multiplication operations would be $O(n^9)$ and when reducing the complexity of the scoring function to $O(n^2)$ would result in an overall complexity of $O(n^6)$ for the training algorithm. However, reducing the complexity of the optimization algorithm in the same fashion would have the same result. Nonetheless, the potential reduction of complexity for the scoring function is likely to be greater than that of the optimization algorithm. This is mainly because much is already known about the different optimization algorithms (see chapter \ref{optimalgorithms}). Including their convergence rates. This is why the scoring function is the focus of this research project and why the optimization and testing will be done for the scoring function only.
+
+Of course the scoring function must be more closely defined as there are two alternatives: The \acl{ML} estimator and the \acl{CSS} estimator. Even though the \acs{ML} estimator is known to be faster, for the performance and precision testing the \acs{CSS} estimator was chosen. The reason for this is twofold: First, the \acs{CSS} method is much simpler to understand, implement and reason about and second, both scoring functions actually rely on calculating the approximation $\Hat{X}_t$ for a given $\acs{ARMA}(p,q)$ process. This calculation is what can actually be improved and will impact both scoring function in the same way, as one call to either one of the scoring function results in exactly one call to this $\acs{ARMA}_{\textrm{predict}}(\omega)$ function.
+
+The final question that has to be addressed before discussing the implementation detail of the $\acs{ARMA}_{\textrm{predict}}(\omega)$ and $\acs{ARMA}_{\textrm{CSS}}(\omega)$ is which solver to use for the system of linear equations that needs to be solved in order to calculate $\Hat{X}_t$ for any $\acs{ARMA}(p,q)$ where $q > 0$. From the section \ref{linsys_solvers} we know there are 6 different methods to choose from: \acl{GS}, \acl{SOR}, \acl{CG} (including its variations), Jacobi, forward substitution and the direct approach using the recursively calculated inverse. We also know from the same chapter that the coefficient matrix of the system is neither symmetric nor positive definite. Therefore the \acl{GS} and  \acl{SOR} are unsuitable for the problem at hand. For the same reason the \acl{CG}, the \acl{Bi-CG} method is not an option as well. The \acl{CGS} method is known to be unstable and therefore also not preferred. The \acl{Bi-CGSTAB} would be a valid option, but it is relatively complex compared to the other methods and therefore prone to implementation errors. Most importantly its complexity doesn't allow it to be used in the context of this research project because there is simply not enough time to implement and test this method properly. This leaves us with three methods: Jacobi, forward substitution and the direct approach using the recursively calculated inverse. Each one of these approaches is to be implemented and to be tested in terms of their performance to determine which is best suited to optimize the performance of the scoring function and by doing so the training algorithm.
+
+Additionally to comparing the different solvers implemented in the \acs{DML} language with each other, they should also be compared to the performance of the implementation of \acs{ARIMA} in the \textit{stats} library of the language R. However, the \textit{stats} package only offers one kind of solver for the system of linear equation and is using the forward substitution method. Furthermore, the core implementation of the algorithm in the \textit{stats} package is done not in R but in native C. Only the interface for the function is provided in R.
+
+\section{ARIMA Implementation}
+
+As mentioned, \acs{ARIMA} is supposed to be tested using SystemML's \acl{DML} and the implementation provided by R's statistics library. The following two sections describe how to run \acs{ARIMA} on each systems respectively. The first section, however, covering the implementation in \ac{DML}, is much more detailed to the degree that it describes every aspect of the \acs{ARIMA} prediction algorithm. The second section, on the other hand, is not describing the actual implementation of \acs{ARIMA} at all, but only how to use the more complex \acs{ARIMA} function of the \textit{stats} package to call the $\acs{ARIMA}_{CSS}$ method in a way that is equivalent to the \acs{DML} implementation. 
+
+\subsection*{DML Script}
+
+The goal of the \textit{arima\_css.dml} script is to calculate the \acl{CSS} of \acs{ARIMA}. Before diving into the details of the implementation, let's reconsider the formulas that should be implemented: 
+
+First of all, we have the formula for the \acl{CSS} (definition \ref{def:arimacss}):
+\begin{equation*}
+    \begin{array}{rcl}
+        ARIMA_{CSS}(\phi_{1..p}, \theta_{1..q}) = \frac{1}{2}\displaystyle\sum_{t=1}^{T} (e_t)^2 = \frac{1}{2}\displaystyle\sum_{t=1}^{T} (X_t - \hat{X}_t)^2
+    \end{array}
+\end{equation*}
+
+Where $\hat{X}_t$ for $\acs{ARMA}(p,q)$ can be calculated by solving the system of linear equations $A \hat{X} = b$ described by equation \ref{eq:ARMA_hat_p_q_transformed_l}:
+\begin{equation*}
+    \displaystyle\sum_{\substack{k=1 \\ k < l}}^{q} \theta_k B^k \hat{X}_{l} + \hat{X}_{l} = \displaystyle\sum_{\substack{i=1 \\ i < l}}^{p} \phi_i B^i X_{l} +\displaystyle\sum_{\substack{k=1 \\ k < l}}^{q} \theta_k B^k X_{l}
+\end{equation*}
+
+where $A = I + R $ with the identity matrix $I$ and $R_{j,i} = \theta_{j-i}$ for $i-j \leq q$ and $b = Z \cdot \omega $ is the matrix product of the weights $\omega = <\phi_1, \dots, \phi_p, \theta_1, \dots, \theta_q>^T$ and the auxiliary matrix $Z \in \mathbb{R}^{l \times (p+q)}$ defined by $Z_{i,j}=X_{(i \bmod p)-j}$. 
+
+To get a better understanding of $R$ and $Z$ and how they are defined reconsider the system of linear equations for $\acs{ARMA}(2,3)$ presented in chapter \ref{linsys_solvers} in equations \ref{eq:ARMA_hat_2_3_big} and \ref{eq:ARMA_hat_2_3_system_big} and examine the matrices depicted there. The coefficient Matrix has already been discussed in detail in the same chapter and for the vector $b$ on the right hand side of the equation note that every element $b_l = \sum_{\substack{i=1 \\ i < l}}^{p} \phi_i B^i X_{l} +\sum_{\substack{k=1 \\ k < l}}^{q} \theta_k B^k X_{l}$ can also be expressed as $b_l = \sum_{\substack{i=1 \\ i < l}}^{p} \phi_i Z_{l}^{(i)} +\sum_{\substack{k=1 \\ k < l}}^{q} \theta_k Z_{l}^{(k)}$ with $Z_{l}^{(i)} = B^i X_{l}$. As can be easily seen $b_l$ can therefore be expressed as $b_l = \Vec{\phi} \cdot \Bar{Z}_l + \Vec{\theta} \cdot \Bar{\Bar{Z}}_l$ with $\Bar{Z}_l = <Z_{l}^{(1)}, \dots, Z_{l}^{(p)}>^T$ and $\Bar{\Bar{Z}}_l = <Z_{l}^{(1)}, \dots, Z_{l}^{(q)}>^T$.
+
+This way of describing the equation \ref{eq:ARMA_hat_p_q_transformed_l} is used in the implementation of the \textit{arima\_predict} function shown in figure \ref{fig:arima_predict}.
+
+\begin{figure}[!ht]
+\centering
+\begin{minted}[ frame         = lines, 
+                framesep      = 0.3cm, 
+                firstnumber   = last,
+                numbers       = left,
+                breaklines
+              ]{R}
+arima_predict = function(Matrix[Double] weights, Matrix[Double] Z, Integer p, Integer q, String solver) return (Matrix[Double] x_hat){
+
+    b = Z %*% weights
+    
+    A = diag(matrix(1, nrow(Z), 1)) #identity matrix
+    
+    if (q > 0){
+        for(i in 1:q){
+            A = addDiagonalToMatrix (A, as.scalar(theta[i]), nrow(A)-i)
+        }
+    }
+    
+    x_hat = eval(solver + "_solver", A, b)
+}
+\end{minted}
+\vspace*{-0.3cm}
+\caption{The \textit{arima\_predict} function}
+\label{fig:arima_predict}
+\end{figure}
+
+The \textit{arima\_predict} function takes five arguments: The weights $\omega$, the auxiliary matrix $Z$, the non-seasonal \acl{AR} order $p$, the non-seasonal \acl{MA} order $q$, and the name of the algorithm that is to be used to solve the system of linear equations. It then calculates the vector of the constant terms $b$ directly by multiplying $Z$ with $\omega$ and continues to construct the coefficient matrix $A$ before calling the function with the name of the algorithm that is supposed to solve the linear system. The construction of $A \in \mathbb{R}^{l \times l}$ starts with initializing $A$ as the identity matrix and then iterating $q$ times through a loop that adds an $(l-i) \times (l-i)$ identity matrix to $A$ as described in more detail below. This smaller matrix $M$ is multiplied with $\theta_i$ before being added to $A$. For the addition of the matrix $M$ and $A$, the matrix A is defined as:
+
+\begin{equation}
+    A = \left(\begin{array}[c]{cc}
+        A_{1,1} & A_{1,2}\\
+        A_{2,1} & A_{2,2}
+    \end{array}\right) 
+\end{equation}
+
+where $A_{1,1} \in \mathbb{R}^{(l-i) \times i}$, $A_{2,1} \in \mathbb{R}^{(l-i) \times (l-i)}$, $A_{1,2} \in \mathbb{R}^{i \times i}$ and  $A_{2,2} \in \mathbb{R}^{i \times (l-i)}$. The addition of $M$ and $A$ is then defined by:
+\begin{equation}
+    A+M = \left(\begin{array}[c]{cc}
+        A_{1,1} & A_{1,2}\\
+        A_{2,1} + M & A_{2,2}
+    \end{array}\right) 
+\end{equation}
+
+This addition of an identity matrix multiplied with a constant value is implemented in the \textit{addDiagonalToMatrix} function shown in figure \ref{fig:addDiagonalToMatrix}.
+
+\begin{figure}[!ht]
+\centering
+\begin{minted}[ frame         = lines, 
+                framesep      = 0.3cm, 
+                firstnumber   = last,
+                numbers       = left,
+                breaklines
+              ]{R}
+addDiagonalToMatrix = function (Matrix[Double] M, Double diagValue, Integer diagSize)return (Matrix[Double] M){
+
+    if (diagSize > 0){
+        diagonal = diag(matrix(diagValue, diagSize, 1))
+        startRow = nrow(M) - diagSize + 1
+        endRow = nrow(M)
+        startCol = 1
+        endCol = diagSize
+        M[startRow:endRow, startCol:endCol] = M[startRow:endRow, startCol:endCol] + diagonal
+    }
+}
+\end{minted}
+\vspace*{-0.3cm}
+\caption{The \textit{addDiagonalToMatrix} function}
+\label{fig:addDiagonalToMatrix}
+\end{figure}
+
+Next up is the implementation of the three different algorithms that are used to solve the system of linear equations. All the functions implementing on of the solvers have the same signature. They all return the solution vector $x$ and take two arguments: The coefficient matrix $A$ and the constant terms vector $b$.
+
+Starting with the simplest one - the forward substitution solver shown in figure \ref{fig:forwardsub}. The update of $x$ was defined in chapter \ref{linsys_solvers} by equation \ref{eq:forwardsub_k} and adjusted to the notation used in the implementation is:
+\begin{equation*}
+   x_i = \frac{b_i - \sum_{k=1}^{i-1} A_{i,k} \cdot x_k}{A_{i,i}} = \frac{b_i - A_{i} \cdot x^{(i-1)} }{A_{i,i}}
+\end{equation*}
+
+Where $x^{(i)}=<x^{(i)}_1, x^{(i)}_2, \dots, x^{(i)}_i, 0, \dots, 0>^T$ is the i-th update of the solution vector $x$ with $x_j$ for $j \leq i$ already calculated and $x_j = 0$ for $j > 0$.
+And this is exactly the formula that has been implemented in the \textit{forwardsub\_solver} function. Note that only the solution of the most recent update is saved, hence $x = x^{(i)}$, and that in \acs{DML} there is no vector data type. Therefore both $x$ and $b$ are represented as $l \times 1$ matrices.
+
+\begin{figure}[!ht]
+\centering
+\begin{minted}[ frame         = lines, 
+                framesep      = 0.3cm, 
+                firstnumber   = last,
+                numbers       = left,
+                breaklines
+              ]{R}
+forwardsub_solver = function (Matrix[Double] A, Matrix[Double] b)  return (Matrix[Double] x){
+    x = matrix(0, nrow(A), 1)
+    for (i in 1:nrow(A)){
+        x[i,1] = (b[i,1] - A[i,] %*% x[,1]) / A[i,i]
+    }
+}
+\end{minted}
+\vspace*{-0.3cm}
+\caption{The \textit{forward substitution} solver}
+\label{fig:forwardsub}
+\end{figure}
+
+The \textit{Jacobi} solver's implementation shown in figure \ref{fig:jacobi} is a little bit more complicated. Again, let's start remembering the update function for this iterative method, which is given in equation \ref{eq:jacobi_update}: 
+\begin{equation*}
+	\begin{array}{lrcl}
+		x_i^{(n+1)}  = \frac{1}{a_{ii}} (b_i - \displaystyle\sum_{\substack{j=1 \\ j\neq i}} a_{ij} \cdot x_j^{(n)})
+	\end{array}
+\end{equation*}
+
+Recalling that for the Jacobi method $A$ was defined as $A=D+R$, the update function can be rewritten in vector notation as:
+\begin{equation*}
+	x^{(n+1)} = D^{-1} \cdot (b - R \cdot x^{(n)})
+\end{equation*}
+
+\begin{figure}[!ht]
+\centering
+\begin{minted}[ frame         = lines, 
+                framesep      = 0.3cm, 
+                firstnumber   = last,
+                numbers       = left,
+                breaklines
+              ]{R}
+jacobi_solver = function (Matrix[Double] A, Matrix[Double] b)  return (Matrix[Double] x){
+    tolerance = 1.0E-8
+    max_iterations = 1000
+    
+    x = matrix(0, nrow(A), 1)
+    iter = 0
+    diff = tolerance+1
+    diagVector_A = diag(A)
+    rest_A = A - diag(diagVector_A)
+    
+    while(iter < max_iterations & diff > tolerance){
+        x_new =1/diagVector_A * (b - rest_A %*% x)
+        diff =sum(abs(x_new-x))
+        iter = iter + 1
+        
+        if (toString(diff) != "NaN") {
+            x = x_new
+        }
+    }
+}
+\end{minted}
+\vspace*{-0.3cm}
+\caption{The \textit{Jacobi} solver}
+\label{fig:jacobi}
+\end{figure}
+
+As before in the implementation of the forward substation method, $x$ is initialized as a $n \times 1$ matrix filled with zeros. Additionally the two constants \textit{tolerance} and \textit{max\_iterations} are introduced and initialized. Afterwards the matrices $D$ and $R$ are derived from $A$. The main part of the function is a while loop that runs as long as the solution has not converged or the maximum iteration count has been reached. In each iteration the update function \eqref{eq:jacobi_update_matrix} is applied, the difference between $x^{(n)}$ and $x^{(n+1)}$ calculated and the iteration counter increased. Note that, first,  $D^{-1}=\frac{1}{D}$ because D is a strictly diagonal matrix, and second, that $x^{(n)}=x^{(n+1)}$ is only applied in line 48 if \textit{diff} does not have any \textit{NaN} values. This sometimes occurs when there is an overflow resulting in \textit{Infinity} or \textit{-Infinity} values in $x^{(n)}$. This sometimes leads to SystemML trying to add \textit{Infinity} to \textit{-Infinity}, which is an undefined operation and results in a \textit{NaN} value. When this happens the solver won't recover by itself as any operation with a \textit{NaN} value results in another \textit{NaN} value. Therefore the solver is implemented in the way that it holds on to the last $x^{(n)}$ that doesn't have a \textit{NaN} value. Instead of letting the while loop continue to run until the maximal amount of iterations has been reached, one should stop the loop as soon as line 47 evalutes \textit{true}. Unfortunately there is neither a \textit{break} nor an explicit \textit{return} operator in \acs{DML} that could be used to achieve this.
+
+In the following figure \ref{fig:inverse} the implementation of the "\textit{inverse}" solver is shown. The function of the solver itself is just calling the \textit{L\_triangular\_inv} function to recursively invert the coefficient matrix $A$ and then uses this to directly calculate the solution $x=A^{-1} \cdot b$. But the \textit{L\_triangular\_inv} function is actually doing the heavy lifting.
+
+
+\begin{figure}[!ht]
+\centering
+\begin{minted}[ frame         = lines, 
+                framesep      = 0.3cm, 
+                firstnumber   = last,
+                numbers       = left,
+                breaklines
+              ]{R}
+inverse_solver = function (Matrix[Double] A, Matrix[Double] b)  return (Matrix[Double] x){
+    invA = L_triangular_inv(A);
+    x = invA %*% b
+}
+
+L_triangular_inv = function(Matrix[double] L) return(Matrix[double] A) {
+    n = ncol(L)
+    if (n == 1) {
+        A = 1/L[1,1]
+    }
+    else {
+        k = as.integer(floor(n/2))
+        
+        L11 = L[1:k,1:k]
+        L21 = L[k+1:n,1:k]
+        L22 = L[k+1:n,k+1:n]
+        
+        A11 = L_triangular_inv(L11)
+        A22 = L_triangular_inv(L22)
+        A12 = matrix(0, nrow(A11), ncol(A22))
+        A21 = -A22 %*% L21 %*% A11
+        
+        A = rbind(cbind(A11, A12), cbind(A21, A22))
+    }
+}
+\end{minted}
+\vspace*{-0.3cm}
+\caption{The inverse solver}
+\label{fig:inverse}
+\end{figure}
+
+The \textit{L\_triangular\_inv} function only takes one argument: the matrix $L$ that it is supposed to invert. As this is an recursive function, the simplest case - $n$ equal to $1$ -  is calculated first with the variable $n$ being the number of columns of the matrix $L$. Having the case that $L$ is an $1 \times 1$ matrix, the inverse is trivial and given by $L^{-1} = 1/L$. For the general case of $n > 1$ the inverse is determined recursively as described in chapter \ref{linsys_solvers} and can be calculated using the equations \ref{eq:derive_recursive_inversion_3}. Adjusted to the notation used in the implementation these are:
+\begin{equation*}
+    \begin{array}[c]{ccc}
+        A_{1,1} &=& L_{1,1}^{-1}\\
+        A_{2,2} &=& L_{2,2}^{-1} \\
+        A_{2,1} &=& - A_{2,2} L_{2,1} A_{1,1}
+    \end{array}
+\end{equation*}
+
+where $L$ and $A$ are $2 \times 2$ matrices constructed by $L_{1,1}, A_{1,1} \in \mathbb{R}^{k \times k}$, $L_{2,1}, A_{2,1} \in \mathbb{R}^{l \times k}$, $L_{2,2}, A_{2,2} \in \mathbb{R}^{l \times l}$ with $l+k=n$ and $L \cdot L^{-1} = I$ with $L^{-1} = A$ is rewritten as:
+\begin{equation*}
+   \left(\begin{array}[c]{cc}
+        L_{1,1} & 0\\
+        L_{2,1} & L_{2,2}
+    \end{array}\right) 
+    \left(\begin{array}[c]{cc}
+        A_{1,1} & 0\\
+        A_{2,1} & A_{2,2}
+    \end{array}\right) 
+    = 
+    \left(\begin{array}[c]{cc}
+        1 & 0\\
+        0 & 1
+    \end{array}\right)
+\end{equation*}
+
+In the implementation, first, $L$ is divided into $L_{1,1}$, $L_{2,1}$, and $L_{2,2}$ and then $A_{1,1}$ and $A_{2,2}$ are calculated recursively. Afterwards they are used to calculated $A_{2,1}$ as described by equation \ref{eq:derive_recursive_inversion_3}.
+
+Having described the \textit{arima\_predict} function as well as each of the algorithms used for solving the system of linear equation, we can come to the final code snippets needed for the \textit{arima\_css.dml} script.
+
+To goal of the \textit{arima\_css.dml} script was to calculate the \acl{CSS}. To do so the residuals of \acs{ARIMA} have to be calculated. They are defined as the difference between the values given for $X_t$ and the approximation $\hat{X}_t$ and therefore calculated by $\textrm{res} = X - \hat{X}$. The function that does this is shown in figure \ref{fig:arima_residuals} and takes the same arguments as the \textit{arima\_predict} function plus one additional one referred to as \textit{ncond}. This is the number of initial observations to be ignored and is equal to the maximum lag of \acs{AR}, which is $p$. This changes the original form of the \acs{AR} model in the way that it is only defined for $\hat{X}_t$ which can be expressed using all values $\phi_i$ of the model. One could consider to skip this and act like \textit{ncond} was set to zero. However, because the default value for ncond used in the implementation of R's \textit{stats} package, this is also applied to the \acs{DML} implementation. This is why in line 83 the residuals for $1 \leq t \leq  \textrm{ncond}$ are set to 0.
+
+\begin{figure}[!ht]
+\centering
+\begin{minted}[ frame         = lines, 
+                framesep      = 0.3cm, 
+                firstnumber   = last,
+                numbers       = left,
+                breaklines
+              ]{R}
+arima_residuals = function(Matrix[Double] weights, Matrix[Double] X, Matrix[Double] Z, Integer p, Integer q,  Integer ncond, String solver) return (Matrix[Double] residuals){
+    
+    x_hat = arima_predict(weights, Z, p, q, solver)
+    residuals = X - x_hat
+    
+    if (ncond > 0) 
+        residuals[1:ncond] = matrix (0, rows = ncond, cols = 1)
+        
+    residuals = replaceNaN(residuals, 0)
+}
+\end{minted}
+\vspace*{-0.3cm}
+\caption{The \textit{arima\_residuals} function}
+\label{fig:arima_residuals}
+\end{figure}
+
+Also note that any \textit{NaN} value that might have been produced by one of the linear system solvers is set to zero as well. Because the only use of the residuals is to be summed up, this is equal to just ignoring each of the \textit{NaN} values. Furthermore, these \textit{NaN} values only occur if at least one other residual is \textit{Infinity} or \textit{-Infinity}. The sum will therefore be either on of these values anyways no matter what all the other values are.
+
+In figures \ref{fig:arima_ssq} and \ref{fig:arima_css} two different functions can be seen that are used for calculating the \acl{CSS}. The first one simply calculates the squared sum of the residuals, normalized by dividing through the number of observations that were used in the model. The normalization is also a detail of R's implementation that was incorporated into the \acs{DML} script to make the results of the two comparable. 
+
+\begin{figure}[!ht]
+\centering
+\begin{minted}[ frame         = lines, 
+                framesep      = 0.3cm, 
+                firstnumber   = last,
+                numbers       = left,
+                breaklines
+              ]{R}
+arima_sumofsquares = function(Matrix[Double] weights, Matrix[Double] X, Matrix[Double] Z, Integer p, Integer q,  Integer ncond, String solver) return (Double sumofsquares, Matrix[Double] residuals){
+
+    residuals = arima_residuals(weights, X, Z, p, q, ncond, solver)
+    sumofsquares = sum(residuals^2)/(nrow(X) - ncond)
+}              
+\end{minted}
+\vspace*{-0.3cm}
+\caption{The \textit{arima\_sumofsquares} functions}
+\label{fig:arima_ssq}
+\end{figure}
+
+The second function is the actual \textit{arima\_css} function that uses the \textit{arima\_sumofsquares} function to calculate the \acl{CSS} which was defined previously as:
+\begin{equation*}
+    \begin{array}{rcl}
+        ARIMA_{CSS}(\phi_{1..p}, \theta_{1..q}) = \frac{1}{2} ARIMA_{SSQ}(\phi_{1..p}, \theta_{1..q}) = \frac{1}{2} \displaystyle\sum_{t=1}^{l} (e_t)^2 = \frac{1}{2}\displaystyle\sum_{t=1}^{l} (X_t - \hat{X}_t)^2
+    \end{array}
+\end{equation*}
+
+But this is not exactly what has been implemented. To ensure that the results of the R and \acs{DML} implementation match up, the definition of $ARIMA_{CSS}$ was changed to:
+
+\begin{equation*}
+    \begin{array}{rcl}
+        ARIMA_{CSS}(\phi_{1..p}, \theta_{1..q}) = \frac{1}{2} \ln{(\displaystyle\sum_{t=1}^{l} (X_t - \hat{X}_t)^2)}
+    \end{array}
+\end{equation*}
+
+
+\begin{figure}[!ht]
+\centering
+\begin{minted}[ frame         = lines, 
+                framesep      = 0.3cm, 
+                firstnumber   = last,
+                numbers       = left,
+                breaklines
+              ]{R}
+arima_css = function(Matrix[Double] weights, Matrix[Double] X, Matrix[Double] Z, Integer p, Integer q,  Integer ncond, String solver) return (Double css, Matrix[Double] residuals){
+    
+    [sumofsquares,residuals] = arima_sumofsquares(weights, X, Z, p, q, ncond, solver)
+    css = 0.5 * log (sumofsquares)
+}
+\end{minted}
+\vspace*{-0.3cm}
+\caption{The \textit{arima\_css} functions}
+\label{fig:arima_css}
+\end{figure}
+
+
+To be able to call the \textit{arima\_css} functions for a given \acs{ARIMA} model, there are two steps: The first one is differencing the time series. This has to be done because \textit{arima\_predict} is only defined for an \acs{ARMA} model and not for an \acs{ARIMA} model. And the second one is constructing the auxiliary matrix $Z$ that was discussed in the beginning of this section.
+
+The differencing operator (definition \ref{def:differncing}) was defined as:
+\begin{equation*}
+    \Delta X_t = X_t - X_{t-1} = (1-B)X_t
+\end{equation*}
+
+with $\Delta^d X_t = \Delta (\Delta^{d-1} X_t )$. Hence, the difference operator $\Delta^d$ is implemented iteratively with $X_t$ denoted as $X[2:n]$ and $X_{t-1}$ as $X[1:n-1]$ where $n$ is the length of the time series. Note that the difference of $\Delta X_1 = X_1$ because $X_{1-1} = X_{0}$ is undefined. This is true for all $d$ and therefore the constants \textit{ncond} should be adjusted accordingly.
+
+\begin{figure}[!ht]
+\centering
+\begin{minted}[ frame         = lines, 
+                framesep      = 0.3cm, 
+                firstnumber   = last,
+                numbers       = left,
+                breaklines
+              ]{R}
+difference = function (Matrix[Double] X, Integer d) return (Matrix[Double] X){
+    if (d > 0){
+        for(i in 1:d){
+            X[2:nrow(X)] = X[2:nrow(X)] - X[1:(nrow(X)-1)]
+        }
+    }
+}
+\end{minted}
+\vspace*{-0.3cm}
+\caption{The \textit{difference} function}
+\label{fig:difference}
+\end{figure}
+
+The \textit{constructPredictorMatrix} function shown in figure \ref{fig:constructPredictorMatrix} can be used to create the auxiliary matrix $Z$. As described in the beginning of this section $Z$ is a $n \times (p+q)$ matrix where $n$ is the length of the time series $X$. Each column of $Z$ is a copy of $X$ but with an offset that corresponds to the index of the column. The idea behind the way $Z$ is build, is to provide $n$ vectors containing all values of $X$ that are needed to calculate the approximation of $\hat{X}_t$. Because there are $p$ values needed for the \acl{AR} model of $\hat{X}_t$ and $q$ values for the \acl{MA} each row vector has the length $p+q$. Furthermore, the offset of $X$'s copy in each column is the column index $i$ for $i \leq p$ and $i-p$ for $i > p$.
+
+For \textit{ncond} greater than zero, the columns containing the $X$ values for the \acl{MA} model need to be adjusted so the residuals calculated by the \textit{arima\_residuals} function are the same as the residuals of R's \acs{ARIMA}. Unfortunately, the reasons for changing the definition of \acs{ARIMA} by introducing the constant \textit{ncond} are not documented by the R Core Team that implemented the \textit{stats} package. However, this particular change made in lines 122 to 127 is necessary to ensure that there are no inconsistencies introduced by changing the definition of \acs{ARIMA}. If one would only set the residuals $e_t$ for $t \leq ncond$ to zero after all $e_t$ have been calculated, then all $\hat{X}_t$ for $t > ncond$ would be calculated using the assumption that $e_t$ is defined the same way for all $t$. Which by the changed definition it is not.
+
+\begin{figure}[!ht]
+\centering
+\begin{minted}[ frame         = lines, 
+                framesep      = 0.3cm, 
+                firstnumber   = last,
+                numbers       = left,
+                breaklines
+              ]{R}
+constructPredictorMatrix = function(Matrix[Double] X, Integer p, Integer q,  Integer ncond) return (Matrix[Double] Z){
+    
+    totalColumns = p + q
+	Z = matrix(0, rows = nrow(X), cols = totalColumns)
+
+    if (p > 0){
+        for(i in 1:p){
+            Z = addShiftedMatrix(Z, X, i, i)
+        }
+    }
+
+    if (q > 0){
+        for(i in 1:q){
+            Z = addShiftedMatrix(Z, X, i, p + i)
+        }
+    }
+    
+    if (ncond > 0){
+        Z[1:ncond,] = matrix(0, rows = ncond, cols = totalColumns)
+        if (q > 0){
+            for (i in 1:q){
+                ignoreRows = min(ncond+i, nrow(Z))
+                Z[1:ignoreRows,(p+i)] = matrix(0, rows = ignoreRows, cols = 1)
+            }
+        }
+    }
+}
+\end{minted}
+\vspace*{-0.3cm}
+\caption{The \textit{constructPredictorMatrix} function}
+\label{fig:constructPredictorMatrix}
+\end{figure}
+
+The function used to add a copy of $X$ with a given offset to the matrix $Z$ is called \textit{addShiftedMatrix} and is implemented in figure \ref{fig:addShiftedMatrix}. This function takes two matrices, the target and a source matrix and two additional scalar arguments, the row offset and the index of the column that the new values of the source matrix are supposed to be copied to. Assuming that the target is $Z$ and the source is $X$ the function would set $Z_{i,j} = X_{j-k}$ with $k$ being the row offset and $i$ the index of the column. But only for $j-k > 0$.
+
+\begin{figure}[!ht]
+\centering
+\begin{minted}[ frame         = lines, 
+                framesep      = 0.3cm, 
+                firstnumber   = last,
+                numbers       = left,
+                breaklines
+              ]{R}
+addShiftedMatrix = function (Matrix[Double] targetMatrix,  Matrix[Double] sourceMatrix, Integer rowOffset, Integer nthColumn)return (Matrix[Double] targetMatrix){
+
+    if (rowOffset < nrow(targetMatrix)){
+        targetMatrix[(rowOffset+1):nrow(targetMatrix), nthColumn] = sourceMatrix[1:(nrow(targetMatrix)-rowOffset)]
+    }
+}
+\end{minted}
+\vspace*{-0.3cm}
+\caption{The \textit{addShiftedMatrix} function}
+\label{fig:addShiftedMatrix}
+\end{figure}
+
+Finally all functions necessary for calculating the \acl{CSS} have been discussed and the only thing left to discuss is the main body of the \textit{arima\_css.dml} script shown in figure \ref{fig:arima_css.dml}. As can be seen, the script first tries to read the parameters that can be provided when executing the script. Only two of them being non-optional parameters: The source of the time series file to be read into $X$ and the source of the file that contains the weights $\phi_i$ and $\theta_j$ for $i \in \{1, \dots, p\}$ and $j \in \{1, \dots, q\}$. The optional parameters are the non seasonal orders $p$, $q$ and $d$ of \acs{AR},\acs{MA} and the difference. All of them are initialized with zero if not provided. Note that none of the values can be negative and either $p$ or $q$ has to be non zero. The solver for the system of linear equation can also be specified. It can be one of the following: "forwardsub" for the forward substitution method, "jacobi" for the Jacobi method and "inverse" for using the recursively calculated inverse. The default is set to "jacobi". The last three parameters that can be specified are "css\_out", "residuals\_out" and "result\_format". The first two can be used to specify the location of the files that contain the output of the \textit{arima\_css} function and are initialized with the default values "arima-css.mtx" and "arima-residuals.mtx". The third one is used to define the format, that should be used to write the residuals and \acl{CSS} into the files. These can be any of the formats supported by \acs{DML}. The two most important are "csv" or "MM" which stands for the Matrix Market format.
+
+After reading and initializing the parameters, the constant \textit{ncond} is defined as the sum of $p$ and $q$ like it is for R's \acs{ARIMA}. Afterwards the difference of $X$ is calculated. $Z$ is created based on the differenced time series and then the \textit{arima\_css} function is called with $Z$ and the differenced time series. Finally the \acl{CSS} is printed and written into the output file. The same is done for the residuals.
+
+
+\begin{figure}[!ht]
+\centering
+\begin{minted}[ frame         = lines, 
+                framesep      = 0.3cm, 
+                firstnumber   = last,
+                numbers       = left,
+                breaklines
+              ]{R}
+X = read($X)
+
+solver = ifdef($solver, "jacobi")
+css_out = ifdef($css_out, "arima-css.mtx")
+residuals_out = ifdef($residuals_out, "arima-residuals.mtx")
+result_format = ifdef($result_format, "MM")
+
+p = ifdef($p, 0)
+d = ifdef($d, 0)
+q = ifdef($q, 0)
+
+weights = ifdef ($weights_src, "")
+
+ncond = d + p
+
+diffX = difference(X, d)
+Z = constructPredictorMatrix(diffX, p, q, ncond)
+[css,residuals] = arima_css(weights, diffX, Z, p, q, ncond, solver)
+
+print("arima_css = " + css)
+write(css, css_out, format = result_format)
+write(residuals, residuals_out, format = result_format)
+\end{minted}
+\vspace*{-0.3cm}
+\caption{The \textit{arima\_css.dml} script's main body}
+\label{fig:arima_css.dml}
+\end{figure}
+
+\clearpage
+
+\subsection*{R Script}
+
+Even though the \textit{arima\_css.r} script is rather long it is quite simple and pretty straight forward. As it is only a wrapper for R's \textit{arima} function, its main task is to read the configuration parameters, measure the execution time and to handle the access to the \acl{HDFS} if necessary. 
+
+Unfortunately, R does not provide a native integration with the \acs{HDFS}. There are a few libraries that could have been used to handle the file access, but they are deprecated and not necessarily suited for the newest version of R. Therefore the access was handled manually by executing a bash command that would copy the file from the \acs{HDFS} to the local file system. Then load the data into memory and delete the temporary files from the local file system afterwards. Lines 172 to 194 show how this was implemented for the file containing the time series $X$ and for the file containing the weights $\phi$ and $\theta$. The same was done for the files containing the residuals and \acl{CSS}. Only in the opposite direction from the local to distributed file system.
+
+Because the copying of the files might take a significant amount of time, two time measurements were introduced. The first one referred to as "run\_time", measures the time from the very beginning of the script until the very end. The second one called "execution\_time" is only for measuring the time it takes to run the script from the point where it reads the data from the local file system to the point where it has run the \textit{arima} function and written the results into the locally stored files.
+
+{\centering
+\begin{minted}[ frame         = lines, 
+                framesep      = 0.3cm, 
+                firstnumber   = last,
+                numbers       = left,
+                breaklines
+              ]{R}
+library(Matrix)
+start_time  <- Sys.time()
+args = commandArgs(trailingOnly=TRUE)
+XPath = args[1]
+weightsPath = args[2]
+cssoutputPath = args[3]
+p= as.numeric(args[4])
+d= as.numeric(args[5])
+q= as.numeric(args[6])
+usehdfs = args[7]
+
+tryCatch({
+  if (usehdfs == TRUE){
+    tmp.Xfile <- sprintf("tmp_hadoop_X_%s.mtx", as.numeric(Sys.time()))
+    tmp.Wfile  <- sprintf("tmp_hadoop_W_%s.mtx", as.numeric(Sys.time()))
+    XPath = tmp.Xfile
+    weightsPath = tmp.Wfile
+    system(command = sprintf("%s dfs -cat %s | perl -pe 's/\t/,/g' > %s", "hdfs", XPath, tmp.Xfile))
+    system(command = sprintf("%s dfs -cat %s | perl -pe 's/\t/,/g' > %s", "hdfs", weightsPath, tmp.Wfile))
+  }
+  arima_css_start_time <- Sys.time()
+  data = as.matrix(readMM(XPath))
+  weights = as.matrix(readMM(weightsPath))
+}, finally = {
+  if (usehdfs == TRUE){
+    cfile.remove(tmp.Xfile)
+    file.remove(tmp.Wfile)
+  }
+})
+  
+fixedmodel = arima(data, fixed = weights, order = c(p,d,q), seasonal = list(order = c(0, 0, 0), period = 0), include.mean = FALSE, transform.pars = FALSE, method = c("CSS"))
+sumofsquares = fixedmodel$sigma2
+css = 0.5 * log(sumofsquares)
+write.table(css, file = cssoutputPath, sep=",", row.names=FALSE, col.names= FALSE)
+
+arima_css_end_time <- Sys.time()
+if (usehdfs == TRUE){
+    # copy css output file from local cssoutputPath to hdfs cssoutputPath
+}
+end_time <- Sys.time()
+sprintf("execution_time:  %f", (arima_css_end_time - arima_css_start_time))
+sprintf("run_time:  %f", (end_time - start_time))
+print(paste("arima_css=", css, sep=" "))
+\end{minted}
+\vspace*{-0.3cm}
+\captionof{figure}{The \textit{arima\_css.r} script\label{fig:arima_css.r}}
+}
+
+
+\clearpage
+
+\section{Performance and Precision Testing}\label{performance_precision_testing}
+
+After having implemented the \textit{arima\_css.dml} script as well as the \textit{arima\_css.r} script, we would like to know how do they compare? And even more important: How do the three linear system solvers impact the performance of the \acs{DML} script and how do they compare to each other? Obviously we'd also like to make sure that the implementation of \acs{ARIMA} in \acs{DML} is indeed correct.
+
+To test how precisely the \textit{arima\_css.dml} calculates the \acl{CSS} compared to R's implementation, both \textit{arima\_css} scripts need to be run with the same configuration. Meaning the same time series, the same weights and the same values for $p$, $d$ and $q$. The same has to be done, if we'd like to compare the time of the two implementations. Because the \textit{arima\_css.dml} script has one additional parameter - the linear system solver - to be specified, we would either have to compare R's implementation only to one of the solvers or run three times the amount of tests and compare each configuration of the R script with the same configuration for the \acs{DML} script, but once with "jacobi" as solver, once with "forwardsub" and once with "inverse". Doing so would also give us the possibility to compare the solvers to each other, which is why this approach was chosen.
+
+To automatically run these tests a simple shell script has been developed. It assumes that there is a configuration file in \acs{CSV} format containing multiple entries of these configuration vectors that each describe how one test run should be done. This configuration is supposed to have twelve columns and an arbitrary amount of rows. These twelve columns are used to hold the following specifications:
+\begin{enumerate}
+    \item X\_src: The source of the time series file containing $X$
+    \item weights\_src: The source of the weights file containing $\phi$ and $\theta$
+    \item residuals\_out: File name in which to put the resulting residual vector
+    \item solver: The solver for the linear system
+    \item p: Non-seasonal \acs{AR} order
+    \item d: Non-seasonal differencing order
+    \item q: Non-seasonal \acs{MA} order
+    \item P: Seasonal \acs{AR} order
+    \item D: Seasonal differencing order
+    \item Q: Seasonal \acs{MA} order
+    \item s: Seasonal period in terms of number of time-steps from one season to the next
+    \item XSize: The length of time series $X$
+\end{enumerate}
+
+The shell script that can take this kind of configuration file and run two tests for each row - one with the R script and one with the \acs{DML} script - is shown in figures \ref{fig:performanceTest.sh_1} and \ref{fig:performanceTest.sh_2}. Even though both of these figures only show excerpts from the original \textit{performanceTest.sh} they do show the relevant part of the shell script. The original one contains some more code for initializing some of the parameters the \textit{performanceTest.sh} is executed with with default values. It does also contain a lot of boilerplate and debugging code which is not to be discussed here.
+
+The first excerpt from the \textit{performanceTest.sh} shows which parameters the script expects. There is a total of eighth parameters, that can be specified when executing the script:
+
+\begin{enumerate}
+    \item "config": The path to the configuration file that was discussed earlier
+    \item "r\_path": The path to the R script
+    \item "dml\_path": The path to the \acs{DML} script
+    \item "systemml": The path to SystemML.jar
+    \item "driver-memory": The memory dedicated to the spark driver. Used for specifying how much RAM the SystemML instance can use
+    \item "executor-memory":The memory dedicated to the spark executor. Used for specifying how much RAM the SystemML instance can use
+    \item "exec\_mode": As described in the \textit{SystemML Documentation}\cite{SystemMLDocumentation} this can be "standalone", "spark", "hadoop" or "hybrid"
+    \item "-usehdfs": Flag determining whether the R script should be looking for the time series and weights file on the local file system or on the \acs{HDFS} (Optional)
+\end{enumerate}
+
+
+
+\begin{figure}[!ht]
+\centering
+\begin{minted}[ frame         = lines, 
+                framesep      = 0.3cm, 
+                firstnumber   = last,
+                numbers       = left,
+                breaklines
+              ]{Shell}
+for ARG in "$@"
+do
+  KEY=$(echo $ARG | cut -f1 -d=)
+  VALUE=$(echo $ARG | cut -f2 -d=)
+  case $KEY in
+    "config") config=$VALUE;;
+    "r_path") r_path=$VALUE;;
+    "dml_path") dml_path=$VALUE;;
+    "systemml") systemml_jar=$VALUE;;
+    "driver-memory") driver_memory=$VALUE;;
+    "executor-memory") executor_memory=$VALUE;;
+    "exec_mode") exec_mode=$VALUE;;
+    "-usehdfs") usehdfs=TRUE;;
+  esac
+done
+\end{minted}
+\vspace*{-0.3cm}
+\caption{Excerpt from the \textit{performanceTest.sh} shell script for reading the parameter}
+\label{fig:performanceTest.sh_1}
+\end{figure}
+
+The second excerpt, on the other hand, shows how one can iterate through the configuration file and execute the R and \acs{DML} script to run a test for the given \acs{ARIMA} model specifications. The outputs of both commands contains the error and debugging logs as well as the results for the \acl{CSS} and most importantly the measurements for the execution time. To extract the measurements one can either choose to write the two variables containing the output into a file and use another script, maybe even of another language for greater convenience, or use another while loop to iterate through each line and look for keywords like "execution\_time" or "run\_time". Of course, the key words needed for extracting the measurements and results from the \acs{DML} output are different then the ones from R's output.
+
+Note that the \acs{DML} script is executed with the additional \textit{-stats} flag. This prints out a
+detailed statistics describing the elapsed time and what it was used for. It shows how much was used for compilation, how much for execution, and of this execution time how much was used for the 10 most time consuming function calls. An example of what this would look like is shown in listing \ref{lst:statsflag}. The rest of the SystemML command is very straight forward. Spark is used to run SystemML with the memory available specified by the "driver\_memory" and "executor\_memory" parameters and all other parameters are passed as name variable arguments by using the \textit{-nvargs} option.
+
+In contrast to that the R script is invoked by passing the arguments by their position and calling R with the path to the script. Note that the \textit{Rscript} does not load the "methods" package  by default to save on start time. However, the "methods" package is required by the "Matrix" package used in the \textit{arima\_css.r} script and therefore needs to be added to the default packages loaded on start up.
+
+
+\begin{lstlisting}[caption=Example of \textit{arima.dml} script run with \textit{-stats} flag \label{lst:statsflag},captionpos=b]
+SystemML Statistics:
+Total elapsed time:		54.247 sec.
+Total compilation time:		7.830 sec.
+Total execution time:		46.417 sec.
+Number of compiled MR Jobs:	40.
+Number of executed MR Jobs:	0.
+Cache hits (Mem, WB, FS, HDFS):	7800032/0/0/2.
+Cache writes (WB, FS, HDFS):	600014/0/1.
+Cache times (ACQr/m, RLS, EXP):	3.837/0.819/4.960/1.225 sec.
+HOP DAGs recompiled (PRED, SB):	6/17.
+HOP DAGs recompile time:	0.342 sec.
+Functions recompiled:		2.
+Functions recompile time:	0.058 sec.
+Total JIT compile time:		54.659 sec.
+Total JVM GC count:		11.
+Total JVM GC time:		1.223 sec.
+Heavy hitter instructions:
+  #  Instruction         Time(s)    Count
+  1  arima_css            40.756        1
+  2  arima_sumofsquares   40.755        1
+  3  arima_residuals      40.717        1
+  4  eval                 34.188        1
+  5  ba+*                 12.072   600001
+  6  replaceNaN            6.199        1
+  7  rightIndex            5.480  2400006
+  8  rmvar                 5.002  6600038
+  9  leftIndex             4.315   600008
+ 10  createvar             4.264  4800028
+\end{lstlisting}
+
+
+\begin{figure}[!ht]
+\centering
+\begin{minted}[ frame         = lines, 
+                framesep      = 0.3cm, 
+                firstnumber   = last,
+                numbers       = left,
+                breaklines
+              ]{Shell}
+while IFS=',' read -r X weights_src residuals_out solver p d q P D Q s Xsize
+do
+    dml_output=$(spark-submit --driver-memory $driver_memory --executor-memory $executor_memory $systemml_jar -f $dml_path -nvargs X=$X weights_src=$weights_src p=$p d=$d q=$q P=$P D=$D Q=$Q s=$s solver=$solver residuals_out=$dest_dml -exec $exec_mode -stats)
+
+    r_output=$(Rscript --verbose --default-packages=methods,datasets,graphics,grDevices,stats,utils $r_path $X $weights_src "" $p $d $q $P $D $Q $s $dest_r $usehdfs)
+
+done < "$config"
+\end{minted}
+\vspace*{-0.3cm}
+\caption{Excerpt from the \textit{performanceTest.sh} shell script showing how to execute the R and DML test runs for all configurations}
+\label{fig:performanceTest.sh_2}
+\end{figure}
+
+In the full \textit{performanceTest.sh} script the output of both the R and \acs{DML} test runs are scanned to retrieve the relevant information like execution-, run-, elapsed- and compilation-time as well as the heavy hitter instructions and the resulting \acl{CSS}. Together with their full configuration vector this information is then written into a new file to make the evaluation of the test results easier.
+
+Now, the only piece missing for running the performance tests are the configuration files themselves. And to be able run multiple tests at once, three of these configuration files were created. One file only containing configuration vectors for solving with "forwardsub", one for "jacobi" and one for "inverse". Each of them contained configurations for the following models: $\acs{AR}(3)$, $\acs{AR}(6)$, $\acs{MA}(3)$, $\acs{MA}(6)$, $\acs{ARIMA}(2,1,2)$ and  $\acs{ARIMA}(4,1,4)$. And each of these models was tested with time series ranging in size from $1$ to $950$ in steps of $50$ and from $1,000$ to $950,000$ in steps of $50,000$. So each model was tested with 40 different time series. At least if the model could be calculated for the given time series. Obviously this is not always the case, because the value of \textit{ncond} needs to be greater than the size of the time series. Configurations for which this would have been the case were not included in the configuration files to begin with. And finally, each one of the configuration files was put through the \textit{performanceTest.sh} script twice.

@@ -1,0 +1,615 @@
+%!TEX root = ../dokumentation.tex
+\chapter{Theory}
+\section{ARIMA Model}\label{arimamodel}
+\newtheorem{definition}{Definition}[section]
+
+The \acl{ARIMA} (\acs{ARIMA}) model is used to analyze and forecast time series data and is a generalization of the \acl{ARMA} (\acs{ARMA}) model. The \acs{ARMA} model in turn is a combination of the \acl{AR} (\acs{AR}) model and the \acl{MA} (\acs{MA}) model.\textsuperscript{\cite{Brockwell2002Introduction2nd}}
+
+The key idea behind both the \acs{AR} and the \acs{MA} model is to describe each value of the time series by using linear combinations that are based on the previous values of the time series. In the case of \acl{AR} the previous values for the linear combination are indeed the raw values of the time series. For \acl{MA} on the other hand the linear combinations are based on the white noise disturbances that are present in the previous predictions. These white noise disturbances are also referred to as residuals and are simply the errors of previous predictions. So essentially an \acs{ARMA} process tries to describe a given point in a time series by combining previous values and the errors that have been made when trying to predicting these previous values. 
+
+However, one restriction of \acs{ARMA} models is that they can only be used for time series that are \textit{stationary}. Meaning that their statistical properties stay constant over time. To overcome this restriction the \acs{ARMA} model has been extended by an additional step called integration, which is used to transform non-stationary time series into stationary ones. The process used for these transformations is called differencing and will be discussed later.
+
+The formal definition for each part that makes up the \acl{ARIMA} model is going to be discussed in the following subsections. Please note that the implementation of \acs{ARIMA} as it is discussed in chapter \ref{methodology} will be slightly modified to match its counterpart implementation in the \textit{stats} library of the language R.
+
+\break
+\subsection*{Autoregression}\label{AR}
+
+To be able to define the \acs{AR} process and all the other parts of \acs{ARIMA} more easily, the backshift or lag operator $B$ is defined as:
+
+\begin{definition}\label{def:backshift_1}
+    The backshift operator $B$ operates on an a given element of a time series to produce the previous element:\textsuperscript{\cite[p.~29]{Brockwell2002Introduction2nd}}
+    \begin{equation}\label{eq:backshift_1}
+        B X_t = X_{t-1}
+    \end{equation}
+\end{definition}
+
+\begin{definition}\label{def:backshift_i}
+    Based on definition \ref{def:backshift_1} the power of $B$ is defined as:
+    \begin{equation}\label{eq:backshit_i}
+        \begin{array}{lclclcl}
+            B^2 X_t &=& B B X_t &=& B X_{t-1} &=& X_{t-2} \\
+            B^3 X_t &=& B B^2 X_t &=& B X_{t-2} &=& X_{t-3} \\
+            \vdots &&&&&&\vdots \\
+            B^i X_t &=& B B^{i-1} X_t && &=& X_{t-i} \\
+        \end{array}
+    \end{equation}
+\end{definition}
+
+Using the backshift operator the $\acs{AR}(p)$ process can be defined as the linear combinations of the p previous elements of the time series:
+
+\begin{definition}\label{def:autoregression}
+    Given a univariate time series \(X_t\) that is stationary with a constant mean of 0 and \(e_t\) a random variable that is \acl{iid} with mean 0 and variance $\sigma^2$ representing the error that can occur in any prediction, the $\acs{AR}(p)$ model is defined by:\textsuperscript{\cite[p.~17]{Brockwell2002Introduction2nd}}
+    \begin{equation}\label{eq:AR_p}
+        \begin{array}{lcl}
+            X_t &=& e_t + \displaystyle\sum_{i=1}^{p} (\phi_i B^i) X_t \\
+            &=& e_t + \phi_1 X_{t-1}+ \phi_2 X_{t-2}+ ... + \phi_p X_{t-p}
+        \end{array}
+    \end{equation}
+    with $\phi_1, ..., \phi_p$ being the parameters of the model.
+\end{definition}
+
+By defining the error of a prediction as the difference between the correct value from the time series and the value from the approximation \(\hat{X_t}\) as: 
+\begin{equation}\label{eq:error_term}
+    e_t = X_t - \hat{X_t}
+\end{equation}
+
+The $\acs{AR}(p)$ process can therefore be used to calculate an approximation or prediction for $X$ with:
+\begin{equation}\label{eq:AR_hat_p}
+    \hat{X_t} =\displaystyle\sum_{i=1}^{p} (\phi_i B^i) X_t 
+\end{equation}
+
+\begin{equation}\label{eq:crossentropy}
+    \\displaystyle\sum_{i=1}^{N} (\phi_i B^i) X_t 
+\end{equation}
+
+\subsection*{Moving Average}\label{MA}
+
+The \acl{MA} model is a linear combination of the error terms $e_t$ as defined by equation \ref{eq:error_term}. It's formal definition is:
+
+\begin{definition}\label{def:movingaverage}
+    Given a univariate and stationary time series \(X_t\) with a constant mean of 0 and the error term $e_t \sim \acs{iid}(0, \sigma^2) $ the $\acs{MA}(q)$ model is defined by:\textsuperscript{\cite[p.~50]{Brockwell2002Introduction2nd}}
+    \begin{equation}\label{eq:MA_q}
+        \begin{array}{lcl}
+            X_t &=& e_t + \displaystyle\sum_{m=1}^{q} (\theta_m B^m) e_t \\
+            &=& e_t + \theta_1 e_{t-1}+ \theta_2 e_{t-2}+ ... + \theta_q e_{t-q}
+        \end{array}
+    \end{equation}
+    with $\theta_1, ..., \theta_q$ being the parameters of the model.
+\end{definition}
+
+Even though the definition of the $\acs{AR}(p)$ model and $\acs{MA}(q)$ model look similar, there is an important difference which makes forecasting with an \acl{MA} model harder in comparison to an \acl{AR} model: When calculating an \acs{AR} model given the model's weights $\phi_1, ..., \phi_p$ and the time series $X$, the approximation $\hat{X_t}$ can be calculated in one step. This is because all the variables in equation \ref{eq:AR_hat_p} are already known. However, when calculating the approximation $\hat{X_t}$ for a \acs{MA} model with:
+
+\begin{equation}\label{eq:MA_hat_q}
+    \begin{array}{lcl}
+        \hat{X_t} &=& \displaystyle\sum_{m=1}^{q} (\theta_m B^m) e_t \\
+        &=& \theta_1 e_{t-1}+ \theta_2 e_{t-2}+ ... + \theta_q e_{t-q}
+    \end{array}
+\end{equation}
+
+The exact values of the error terms from $e_{t-1}$ up to $e_{t-q}$ are not known and need to be calculated first. But to calculate $e_{t-1}= X_{t-1} - \hat{X}_{t-1}$ the approximation of $X_{t-1}$ is also unknown and needs to be calculated first. Which in turn is dependent on the values for the error terms from $e_{t-2}$ up to $e_{t-q-1}$. And this goes on for $\hat{X}_{t-2}$, which will need all the values for the terms  from $e_{t-3}$ up to $e_{t-q-2}$. This pattern continues for all $\hat{X_{t}}$ up to the last one being $\hat{X_0}$ and eventually the values for all error terms from $e_{t-1}$ to $e_{1}$ need to be calculated.
+
+As an example, consider the $\acs{MA}(3)$ model's approximation for $\hat{X_t}$:
+\begin{equation}\label{eq:MA_hat_3}
+    \begin{array}{lcl}
+        \hat{X_t} &=& \theta_1 e_{t-1}+ \theta_2 e_{t-2} + \theta_3 e_{t-3} \\
+        &=& \theta_1 (X_{t-1} - {\hat{X}}_{t-1}) + \theta_2 (X_{t-2} - {\hat{X}}_{t-2}) + \theta_3 (X_{t-3} - {\hat{X}}_{t-3})
+    \end{array}
+\end{equation}
+
+Assuming that the time series $X$ is of length 4, the equations that need to be solved to calculate an approximation for $\hat{X_5}$ are:
+
+\begin{equation}\label{eq:MA_hat_3_system_1}
+    \begin{array}{lcl}
+        {\hat{X}}_{5} & = & \theta_1 (X_{4} - {\hat{X}}_{4}) + \theta_2 (X_{3} - {\hat{X}}_{3}) + \theta_3 (X_{2} - {\hat{X}}_{2}) \\
+        {\hat{X}}_{4} & = & \theta_1 (X_{3} - {\hat{X}}_{3}) + \theta_2 (X_{2} - {\hat{X}}_{2}) + \theta_3 (X_{1} - {\hat{X}}_{1}) \\
+        {\hat{X}}_{3} & = & \theta_1 (X_{2} - {\hat{X}}_{2}) + \theta_2 (X_{1} - {\hat{X}}_{1})\\
+        {\hat{X}}_{2} & = & \theta_1 (X_{1} - {\hat{X}}_{1})\\
+        {\hat{X}}_{1} & = & 0
+    \end{array}
+\end{equation}
+
+Note that terms $e_t$, $X_t$, $\hat{X_t}$  with $t\leq0$ are implicitly defined with a value of $0$.
+
+All non trivial approximations of a \acl{MA} model produce such a system of linear equations to be solved and can be transformed to a system of linear equations of the form
+
+\begin{equation}\label{eq:syslinequation}
+\mathbf{A}  \vec{\hat{x}} = \vec{b}
+\end{equation}
+
+with $\mathbf{A} \in \mathbb{R}^{n\times n}$ being an $n\times n$ Matrix,  $\vec{\hat{x}} \in \mathbb{R}^n$ and  $\vec{b}\in \mathbb{R}^n$ both n-dimensional vectors. The vector of $\vec{b}$ representing the known terms for each equation, $\vec{\hat{x}}$ the unknown terms and $\mathbf{A}$ the coefficients of all the $\vec{\hat{x}}$ for each equation.
+
+The known terms in case of the $\acs{MA}(q)$ process are terms that consist out of $\theta$ and $X_t$ and unknown terms are combinations of $\theta$ with $\hat{X_t}$. 
+
+To see how $\mathbf{A}$ and  $\vec{b}$ have to be constructed, the system of linear equations \eqref{eq:MA_hat_3} can be transformed to:
+
+\begin{equation}\label{eq:MA_hat_3_system_2}
+    \begin{array}{rcrcrcrcrclll}
+        {\hat{X}}_{1}&&&&&&&&& = &0&&\\
+        \theta_1 {\hat{X}}_{1} &+& {\hat{X}}_{2} & & & & & & &= &\theta_1 X_{1}&&\\
+        
+        \theta_2 {\hat{X}}_{1}&+&\theta_1 {\hat{X}}_{2} &+& {\hat{X}}_{3}&  &  &&& = &\theta_1 X_{2} &+ \theta_2 X_{1}&\\
+        
+        \theta_3 {\hat{X}}_{1} &+& \theta_2 {\hat{X}}_{2} &+&  \theta_1 {\hat{X}}_{3}&+& {\hat{X}}_{4}& && = &\theta_1 X_{3} &+ \theta_2 X_{2} &+ \theta_3 X_{1}\\ 	
+        
+        &&\theta_3 {\hat{X}}_{2} &+& \theta_2 {\hat{X}}_{3}&+& \theta_1 {\hat{X}}_{4} &+&{\hat{X}}_{5}& = &  \theta_1 X_{4} &+\theta_2 X_{3} &+ \theta_3 X_{2}
+    \end{array}
+\end{equation}
+
+
+This leads directly to the general form for systems of linear equations \eqref{eq:syslinequation}:
+
+\begin{equation}\label{eq:MA_hat_3_system_3}
+    \left(\begin{array}[c]{lllll}
+        1 & 0 & 0 & 0 & 0\\
+        \theta_1 & 1 & 0 & 0 & 0\\
+        \theta_2 & \theta_1& 1 & 0 & 0\\
+        \theta_3 & \theta_2 & \theta_1& 1 & 0\\
+        0 & \theta_3 & \theta_2 & \theta_1& 1
+    \end{array}\right)
+    \left(\begin{array}[c]{c}
+        \hat{X_1}\\
+        \hat{X_2}\\
+        \hat{X_3}\\
+        \hat{X_4}\\
+        \hat{X_5}
+    \end{array}\right)
+    \;=
+    \left(\begin{array}[c]{rrr}
+        0 &&\\ 
+        \theta_1 X_{1} &&\\
+        \theta_1 X_{2} &+ \theta_2 X_{1} &\\
+        \theta_1 X_{3} &+ \theta_2 X_{2} &+ \theta_3 X_{1} \\
+        \theta_1 X_{4} &+ \theta_2 X_{3} &+ \theta_3 X_{2} 
+    \end{array}\right)
+\end{equation}
+
+Having the system of linear equations in this particular form allows the usage of numerical solvers to do the heavy lifting when calculating the values for $\hat{X_t}$. These approaches are described in detail in chapter \ref{linsys_solvers}.
+
+\subsection*{\acl{ARMA}}\label{section:arma}
+
+The \acs{ARMA}$(p,q)$ model can now be defined by combining the \acs{AR}$(p)$ and \acs{MA}$(q)$ model as defined in \ref{def:autoregression} and \ref{def:movingaverage}.
+
+\begin{definition}\label{def:arma}
+    Given a univariate and stationary time series \(X_t\) with a constant mean of 0 and the error term $e_t \sim \acs{iid}(0, \sigma^2) $ the $\acs{ARMA}(p,q)$ model is defined as:\textsuperscript{\cite[p.~55]{Brockwell2002Introduction2nd}}
+    \begin{equation}\label{eq:ARMA_p_q}
+        \begin{array}{rcl}
+            (1-\displaystyle\sum_{i=1}^{p} \phi_i B^i) X_t & = & (1+\displaystyle\sum_{k=1}^{q} \theta_k B^k)e_t\\
+            
+            \Leftrightarrow X_t - \phi_1 X_{t-1} - \phi_2 X_{t-2} - ... - \phi_p X_{t-p} & = & e_t + \theta_1 e_{t-1}+ \theta_2 e_{t-2}+ ... + \theta_p e_{t-q}
+        \end{array}
+    \end{equation}
+    with $\phi_1, ..., \phi_p$ and $\theta_1, ..., \theta_q$ being the parameters of the model.
+\end{definition}
+
+The approximation $\hat{X}_t$ can therefore be calculated by:
+\begin{equation}\label{eq:ARMA_hat_p_q}
+    \begin{array}{rcl}
+        \hat{X_t} &=& \displaystyle\sum_{i=1}^{p} \phi_i B^i X_t +\displaystyle\sum_{k=1}^{q} \theta_k B^k e_t\\
+        
+        \Leftrightarrow\hat{X}_t &=& \phi_1 X_{t-1} + \phi_2 X_{t-2} + ... + \phi_p X_{t-p} + \theta_1 e_{t-1}+ \theta_2 e_{t-2}+ ... + \theta_p e_{t-q}
+    \end{array}
+\end{equation}
+
+For an $\acs{ARMA}(2,3)$ model this equation would change to:
+\begin{equation}\label{eq:ARMA_hat_2_3}
+    \hat{X_t} = \phi_1 X_{t-1} + \phi_2 X_{t-2} + \theta_1 e_{t-1} + \theta_2 e_{t-2}+ \theta_3 e_{t-3}
+\end{equation}
+
+
+
+Assuming that again the length of the time series $X$ is 4, the approximation for $\hat{X_5}$ would produce a system of linear equations that can be expressed as:
+
+\begin{equation}\label{eq:ARMA_hat_2_3_system}
+    \left(\begin{array}[c]{lllll}
+        1 & 0 & 0 & 0 & 0\\
+        \theta_1 & 1 & 0 & 0 & 0\\
+        \theta_2 & \theta_1& 1 & 0 & 0\\
+        \theta_3 & \theta_2 & \theta_1& 1 & 0\\
+        0 & \theta_3 & \theta_2 & \theta_1& 1
+    \end{array}\right)
+    \;\hat{X}=
+    \left(\begin{array}[c]{rrrrr}
+        0 &&&&\\ 
+        \phi_1 X_1& &+\theta_1 X_{1} &&\\
+        \phi_1 X_2 &+ \phi_2 X_1&+ \theta_1 X_{2} &+ \theta_2 X_{1} &\\
+        \phi_1 X_3 &+ \phi_2 X_2&+ \theta_1 X_{3} &+ \theta_2 X_{2} &+ \theta_3 X_{1} \\
+        \phi_1 X_4 &+ \phi_2 X_3&+ \theta_1 X_{4} &+ \theta_2 X_{3} &+ \theta_3 X_{2} 
+    \end{array}\right)
+\end{equation}
+
+\subsection*{\acl{ARIMA}}
+
+To define \acs{ARIMA} the definition of \acs{ARMA} \eqref{def:arma} is extended by the definition of the integration component. This component is supposed to generalize \acs{ARMA}, restricted to the class of stationary time series, to also incorporate the classes of non stationary time series. 
+
+Generally there are two approaches that can be used so the restricted \acs{ARMA} model can be used for non stationary time series as well. Both are based on transforming the non stationary time series $X_t$ to a stationary time series $X_t'$. Given that the time series $X_t$ does not also exhibit seasonal behavior, one approach would be to fit a polynomial trend by for example using least squares, to the time series $X_t$ and then subtracting the fitted trend from $X_t$, resulting in a stationary time series $X_t`$. The second option is to remove the trend by differencing the time series $X_t$. The obvious advantage of the second method being the computational complexity on the one hand and that it can also remove trends that don't remain constant over time on the other hand. \textsuperscript{\cite[p.~25]{Brockwell2002Introduction2nd}}
+
+\begin{definition}\label{def:differncing}
+    The differencing operator $\Delta$ is defined by:
+    \begin{equation}\label{eq:first_difference}
+        \Delta X_t = X_t - X_{t-1} = (1-B)X_t
+    \end{equation}
+\end{definition}
+
+Furthermore the $j$-th power of the differencing operator is $\Delta^j X_t = \Delta (\Delta^{j-1} X_t)$ with \(\Delta^0 X_t = X_t\). Polynomials with \(\Delta\) and $B$ are manipulated in precisely the same way as polynomial functions of real variables.\textsuperscript{\cite[p.~29]{Brockwell2002Introduction2nd}} For example:
+
+\begin{equation}\label{eq:example_delta_squared}
+    \begin{array}[c]{lcl}
+        \Delta^2 X_t &=& \Delta (\Delta X_t) \\
+        &=& (1-B)(1-B)X_t \\
+        &=& (1-2B + B^2) X_t \\
+        &=& X_t - 2 X_{t-1} +  X_{t-2}
+    \end{array}
+\end{equation}
+
+To show that differencing can be used to remove the trend of a time series, lets assume that the time series can be described with a linear trend function $m_t=c_0 + c_1 t$. Then applying the differencing operator results in the constant function:
+\begin{equation}\label{eq:example_differnce_linear_trend}
+    \begin{array}[c]{lcl}
+        \Delta m_t &=& m_t - m_{t-1} \\
+        &=& c_0 + c_1 t - (c_0 + c_1 (t-1)) \\
+        &=& c_1 t - c_1 (t-1)\\
+        &=& c_1
+    \end{array}
+\end{equation}
+
+It can be shown that the same holds truth for any polynomial trend of degree $k$: $m_t=\sum_{j=0}^{k}c_j t^j$. And if a time series can be described with such a linear trend function by $X_t = m_t + Y_t$ and $Y_t$ is already stationary with zero mean, the application of $\Delta^k$ gives a stationary process with mean $k!c_k$: 
+\begin{equation}\label{eq:example_differnce_ts_polynomial_trend}
+    \begin{array}[c]{lcl}
+        \Delta^k X_t&=& k!c_k + \Delta^k Y_t
+    \end{array}
+\end{equation}
+
+Applying the differencing operator once more yields a stationary process with mean zero.
+
+This suggest that given any time series $X_t$, there is a $k$ for which the time series $\Delta^k X_t$ can be modelled using a stationary process. Often the order of differencing $k$ is quite small, usually one or two, as many functions can be approximated well using a polynomial of reasonable low degree. \textsuperscript{\cite[p.~30]{Brockwell2002Introduction2nd}}
+
+Based on this we can finally define the \acs{ARIMA} process:
+\begin{definition}\label{def:arima}
+    Given a univariate time series \(X_t\) with a constant mean of 0 and the error term $e_t \sim \acs{iid}(0, \sigma^2) $ the $\acs{ARIMA}(p,d,q)$ model is defined as:\textsuperscript{\cite[p.~55]{Brockwell2002Introduction2nd}}
+    \begin{equation}\label{eq:ARIMA_p_d_q}
+        \begin{array}{lccl}
+            (1-\displaystyle\sum_{i=1}^{p} \phi_i B^i) & \Delta^d X_t & = & (1+\displaystyle\sum_{k=1}^{q} \theta_k B^k)e_t
+        \end{array}
+    \end{equation}
+    with $\phi_1, ..., \phi_p$ and $\theta_1, ..., \theta_q$ being the parameters of the model. The parameter $p$ is known as the order of the \acl{AR} model, the parameter $q$ as the order of the \acl{MA} model and the parameter $d$ as the order of difference. 
+\end{definition}
+
+
+\section{Optimization Algorithm}\label{optimalgorithms}
+
+To forecast using an \acs{ARIMA} model, the \acs{AR} and \acs{MA} coefficients $\phi$ and $\theta$ have to be estimated first. This is done by solving an optimization problem:
+\begin{equation}\label{eq:minmax_g}
+\begin{array}{c}
+\displaystyle\max_{\phi_{1..p}, \theta_{1..q} \in R} \; g(\phi_{1..p}, \theta_{1..q})\\
+or \\
+\displaystyle\min_{\phi_{1..p}, \theta_{1..q} \in R} \; g(\phi_{1..p}, \theta_{1..q})
+\end{array}
+\end{equation}
+
+with the function $g$ being the \acl{ML}, Yule-Walker, or \acl{CSS} estimator. However, the Yule-Walker estimator is usually only used for pure \acl{AR} models.\textsuperscript{\cite[p.~139]{Brockwell2002Introduction2nd}} It is therefore not discussed any further.
+
+In case of the Maximum Gaussian Likelihood (\acs{ML}) estimator, the data is assumed to be a realization of a stationary Gaussian time series and one tries to maximize the likelihood with respect to the parameters $\phi_{1},...,\phi_{p}$ and $\theta_{1},...,\theta_{p}$. The maximum of the likelihood function can not be calculated by solving a system of linear equations algebraically and is instead found by using numeric approaches. However, the algorithms commonly used for this need initial values for the coefficients to start the search from. The closer the initial guess is to the real coefficients the faster the search will be. \textsuperscript{\cite[p.~138]{Brockwell2002Introduction2nd}} 
+
+An alternative to the \acl{ML} estimator is the estimation using the \acl{CSS}. This is a least squares method and the idea is to minimize the the sum of the squared residuals. 
+
+\begin{definition}\label{def:arimacss}
+    Given a univariate time series $X_t$ of size T the $ARIMA_{CSS}$ function is defined as:
+    \begin{equation}\label{eq:ARIMA_CSS}
+        \begin{array}{rcl}
+            ARIMA_{CSS}(\phi_{1..p}, \theta_{1..q}) = \frac{1}{2}\displaystyle\sum_{t=1}^{T} (e_t)^2 = \frac{1}{2}\displaystyle\sum_{t=1}^{T} (X_t - \hat{X}_t)^2
+        \end{array}
+    \end{equation}
+\end{definition}
+
+The \acs{CSS} method is said to be slower then the \acl{ML} estimator. But on the flip side its performance is also not as dependent on the initial guess as the \acs{ML} estimator's performance is.
+This is why the \acl{ML} estimator is commonly preferred over the \acs{CSS} method,  even though the \acs{CSS} method is still in use. Either to quickly find a "good guess" for the \acs{ML} estimator to start with or completely on its own. That it is also used on it's own is mostly due to the fact that it is the simpler estimator and more easily implemented. 
+
+But no matter which one of the functions to be optimized over is chosen, none of them can be maximized or minimized by solving a system of linear equations algebraically. They all need a numeric optimization algorithm to be solved.
+
+There are different algorithms that have been developed to solve such a optimization problem. Some of the most common ones that are also provided by the general-purpose optimization function $optim()$  of R are called:\textsuperscript{\cite{TeamROptimization}}
+\begin{itemize}
+	\item Nelder-Mead method,
+	\item \acl{CG} (\acs{CG}) method,
+	\item \acl{BFGS} (\acs{BFGS}) method,
+	\item \acl{L-BFGS} (\acs{L-BFGS}) method, and
+	\item SANN method
+\end{itemize}
+
+The Nelder-Mead method also known as downhill simplex method is a direct search method known to be robust but slow. As a direct search method it only uses the function values and doesn't need a gradient, making it work reasonably well for non-differentiable functions as well.\textsuperscript{\cite{TeamROptimization}}
+
+The SANN method is a variation of simulated annealing given in Belisle (1992)\textsuperscript{\cite{Belisle1992ConvergenceD}} and is a part of the class of stochastic global optimization methods. Like the Nelder-Mead method it also uses function values only and is fairly slow.\textsuperscript{\cite{TeamROptimization}}
+
+The \acs{BFGS} algorithm on the other hand belongs to the class of the \textit{Newton} methods or more specifically to the class of \textit{Quasi-Newton} methods. It is said to be faster than the other methods provided by the general-purpose optimization function $optim()$ and uses both the function values and the gradients. As a \textit{Newton} method it is iteratively approximating the root $\hat{x}$ of $g(x)$ using the gradient of the function $g: R^n \rightarrow R^n$ by updating $\hat{x}$ with the inverse of the Jacobi matrix $J_g(x)$:
+%TODO: Add reference from PA4
+
+\begin{equation}\label{eq:newtons_method_multivariate_root}
+	\begin{array}{c}
+		\vec{\hat{x}}_{n+1} =\vec{\hat{x}}_{n} - \frac{g(\vec{\hat{x}}_{n})}{J_g(\vec{\hat{x}}_{n})} = \vec{\hat{x}}_{n} - g(\vec{\hat{x}}_{n}) \cdot J_g^{-1}(\vec{\hat{x}}_{n})
+	\end{array}
+\end{equation}
+
+When using the \textit{Newton} method to optimize a function $f:R^n \rightarrow R$ instead of finding its root this is equivalent to finding the root of the \textit{gradient} $\Delta f$, which means that the approximation $\vec{\hat{x}}_{n+1}$ for an extrema of $f$ is given by\textsuperscript{\cite{15}}:
+
+\begin{equation}\label{eq:newtons_method_multivariate_extrema}
+	\begin{array}{lcl}
+		\vec{\hat{x}}_{n+1} &=&\vec{\hat{x}}_{n} - \frac{\Delta f(\vec{\hat{x}}_{n})}{J_{\Delta f}(\vec{\hat{x}}_{n})}\\
+		&=&\vec{\hat{x}}_{n} - \frac{\Delta f(\vec{\hat{x}}_{n})}{H_{f}(\vec{\hat{x}}_{n})}\\
+		&=& \vec{\hat{x}}_{n} - \Delta f(\vec{\hat{x}}_{n}) \cdot H_{f}^{-1}(\vec{\hat{x}}_{n})
+	\end{array}
+\end{equation}
+
+With $H_f(\hat{x}_{n})$ being the Hessian, a square matrix of all \textit{second-order} partial derivatives.
+
+As a \textit{Quasi-Newton} method the \acs{BFGS} algorithm is not calculating the Hessian or Jacobi matrix directly but instead tries to approximate it as well. This is important because just calculating the Hessian takes $O(n^2)$ function evaluations and inverting any matrix as an additional computational complexity of $O(n^3)$ using standard techniques.
+%TODO: Add reference from PA4
+
+
+As an improvement of the \acs{BFGS} method the \acl{L-BFGS} algorithm has been developed. It allows to limit the memory usage by introducing additional constraints on the coefficients of the function to be optimized over. To be more specific, it requires to add box constraints to each variable, giving them an lower and/or upper bound. \textsuperscript{\cite{TeamROptimization}}
+
+Another alternative that is also relying on both the function values and the gradients is the \acl{CG} method. It works similar to the \acs{L-BFGS} algorithm and has a similar convergence speed as well. But it doesn't need to store a matrix like the \acs{BFGS} algorithm and can therefore be much more successful for larger optimization problems. However, the \acs{L-BFGS} algorithm outperforms in term of speed for more computationally expensive functions because it needs less function evaluations than \acs{CG}.\textsuperscript{\cite{ALGLibUnconstrainedCG}}
+
+To be able to use either one of the last two methods the gradient of $ARIMA_{CSS}$ needs to be calculated first. This can be done by using the finite differencing approach, recalculating the approximation of the gradient for each new set of coefficients, or by working out the gradients algebraically and providing a way to calculate the gradient directly. Obviously the advantage of the first approach is its simplicity and that it requires less implementation work. It is also less prone to implementation errors but this comes at a cost. Using the finite differencing approach for an $\acs{ARMA}(p,q)$ process requires $2*(p+q)$ function evaluations where the direct calculations of the gradient functions requires only one. Therefore the direct calculation of the gradients is preferred to increase the performance and the gradients for $\phi_n$ and $\theta_n$ for the $ARIMA_{CSS}$ function \eqref{eq:ARIMA_CSS}, given the approximation function for $\hat{X_t}$ in equation \ref{eq:ARMA_hat_p_q}, are given by:
+
+\begin{equation}\label{eq:gradient_arima_phi}
+	\begin{array}{lcl}
+		\frac{\partial}{\partial \phi_n} ARIMA_{CSS}(\phi_{1..p}, \theta_{1..q}) &=& \frac{1}{2}\displaystyle\sum_{t=1}^{T} 2 \cdot (X_t - \hat{X}_t) \cdot (\frac{\partial}{\partial \phi_n} (X_t - \hat{X}_t))\\
+        &=& \displaystyle\sum_{t=1}^{T} e_t \cdot  (-B^n X_t)
+	\end{array}
+\end{equation}
+
+\begin{equation}\label{eq:gradient_arima_theta}
+	\begin{array}{lcl}
+		\frac{\partial}{\partial \theta_n} ARIMA_{CSS}(\phi_{1..p}, \theta_{1..q}) &=& \displaystyle\sum_{t=1}^{T} e_t \cdot  (-B^n e_t)
+	\end{array}
+\end{equation}
+
+\pagebreak
+
+\section{Solvers for System of Linear Equations }\label{linsys_solvers}
+
+No matter which optimization algorithm is chosen and how good it is, the computational complexity of the function calculating $\hat{X_t}$ \eqref{eq:ARMA_hat_p_q} will be the most important factor when it comes to determining the efficiency of the training algorithm for \acs{ARIMA}. And the most computational heavy part of this function is solving the system of linear equations as described by equation \ref{eq:ARMA_hat_2_3_system}. The problem with this particular system of linear equations is that its size growths quadratically with the size of the time series X. So if one wished to train an \acs{ARIMA} model with a time series of size T, then in each function call to $ARIMA_{CSS}$ requires a system of linear equations with T free variables and a coefficient matrix of $T^2$ entries to be solved. This is why solving the system of linear equations in an efficient manner is important.
+
+Fortunately, there are many algorithms that have been developed to accomplish this task. But to choose the most promising ones the properties of the system need to be discussed first.
+
+Lets first consider the example of the system of linear equations for the $\acs{ARMA}(2,3)$ process given in chapter \ref{section:arma}. And to make it easier to see the patterns lets assume that instead of a time series of size 4 we have a time series with 7 samples and are trying to calculate the approximation $\hat{X}_8$. Remembering that the formula of $\hat{X}_t$ for the $\acs{ARMA}(2,3)$ process was
+\begin{equation}\label{eq:ARMA_hat_2_3_remember}
+    \hat{X_t} = \phi_1 X_{t-1} + \phi_2 X_{t-2} + \theta_1 e_{t-1} + \theta_2 e_{t-2}+ \theta_3 e_{t-3}
+\end{equation}
+
+the system of linear equations would look like:
+\begin{equation}\label{eq:ARMA_hat_2_3_big}
+	\begin{array}{lcccccccccc}
+	
+        \hat{X_1} &=& 0 &&&&&&&&\\
+        \hat{X_2} &=& \phi_1 X_{1} &&&+& \theta_1 (X_{1}-\hat{X}_{1}) &&&& \\
+        \hat{X_3} &=& \phi_1 X_{2} &+& \phi_2 X_{1} &+& \theta_1 (X_{2}-\hat{X}_{2}) &+& \theta_2  (X_{1}-\hat{X}_{1})&&\\
+        \hat{X_4} &=& \phi_1 X_{3} &+& \phi_2 X_{2} &+& \theta_1 (X_{3}-\hat{X}_{3}) &+& \theta_2  (X_{2}-\hat{X}_{2})&+& \theta_3  (X_{1}-\hat{X}_{1}) \\
+        \hat{X_5} &=& \phi_1 X_{4} &+& \phi_2 X_{3} &+& \theta_1 (X_{4}-\hat{X}_{4}) &+& \theta_2  (X_{3}-\hat{X}_{3})&+& \theta_3  (X_{2}-\hat{X}_{2}) \\
+        \hat{X_6} &=& \phi_1 X_{5} &+& \phi_2 X_{4} &+& \theta_1 (X_{5}-\hat{X}_{5}) &+& \theta_2  (X_{4}-\hat{X}_{4})&+& \theta_3  (X_{3}-\hat{X}_{3}) \\
+        \hat{X_7} &=& \phi_1 X_{6} &+& \phi_2 X_{5} &+& \theta_1 (X_{6}-\hat{X}_{6}) &+& \theta_2  (X_{5}-\hat{X}_{5})&+& \theta_3  (X_{4}-\hat{X}_{4}) \\
+        \hat{X_8} &=& \phi_1 X_{7} &+& \phi_2 X_{6} &+& \theta_1 (X_{7}-\hat{X}_{7}) &+& \theta_2  (X_{6}-\hat{X}_{6})&+& \theta_3  (X_{5}-\hat{X}_{5})
+    \end{array}
+\end{equation}
+
+Of course, trying to examine the system in this form would be more tedious than it has to be and therefore we'll examine the system in its general form and as a matrix equation $A \vec{\hat{x}} = \vec{b}$:
+\begin{equation}\label{eq:ARMA_hat_2_3_system_big}
+    \left(\begin{array}[c]{llllllll}
+        1 & 0 & 0 & 0 & 0 & 0 & 0 & 0\\
+        \theta_1 & 1 & 0 & 0 & 0 & 0 & 0 & 0\\
+        \theta_2 & \theta_1& 1 & 0 & 0 & 0 & 0 & 0\\
+        \theta_3 & \theta_2 & \theta_1& 1 & 0 & 0 & 0 & 0\\
+        0 & \theta_3 & \theta_2 & \theta_1& 1 & 0 & 0 & 0\\
+        0 & 0 & \theta_3 & \theta_2 & \theta_1& 1 & 0 & 0\\
+        0 & 0 & 0 & \theta_3 & \theta_2 & \theta_1& 1 & 0\\
+        0 & 0 & 0 & 0 & \theta_3 & \theta_2 & \theta_1& 1
+    \end{array}\right)
+    \;\vec{\hat{X}}=
+    \left(\begin{array}[c]{rrrrr}
+        0 &&&&\\ 
+        \phi_1 X_1& &+\theta_1 X_{1} &&\\
+        \phi_1 X_2 &+ \phi_2 X_1&+ \theta_1 X_{2} &+ \theta_2 X_{1} &\\
+        \phi_1 X_3 &+ \phi_2 X_2&+ \theta_1 X_{3} &+ \theta_2 X_{2} &+ \theta_3 X_{1} \\
+        \phi_1 X_4 &+ \phi_2 X_3&+ \theta_1 X_{4} &+ \theta_2 X_{3} &+ \theta_3 X_{2} \\
+        \phi_1 X_5 &+ \phi_2 X_4&+ \theta_1 X_{5} &+ \theta_2 X_{4} &+ \theta_3 X_{3} \\
+        \phi_1 X_6 &+ \phi_2 X_5&+ \theta_1 X_{6} &+ \theta_2 X_{5} &+ \theta_3 X_{4} \\
+        \phi_1 X_7 &+ \phi_2 X_6&+ \theta_1 X_{7} &+ \theta_2 X_{6} &+ \theta_3 X_{5} \\
+    \end{array}\right)
+\end{equation}
+
+Note that the vector $\vec{\hat{X}}$ represents the unknowns of the system, the vector $\vec{b}$ the known constant terms and the matrix $A$ the coefficients. Determining the properties of $A$ will give us insight about the system of linear equations and tell us which solving algorithms are viable and 
+help to determine the effectiveness.
+
+First of all, the coefficients matrix $A$ is a squared matrix and has only 1s on its main diagonal. Its  upper triangle is zero and the only other non zero values are on the diagonals beneath the main diagonal. The matrix $A$ can therefore be described as a lower triangular matrix.
+Being a triangular matrix the matrix has a determinant that is equal to the product of its main diagonal. Hence, $det(A)=1$ which means the matrix is invertible as any matrix that as a non zero determinant is invertible. Furthermore it is diagonally dominant if $\theta_1 + \theta_2 + \theta_3 < 1$. 
+
+Another important aspect to note is that the distribution of the values $\theta_1, \theta_2$ and $\theta_3$ are creating a distinct pattern in the matrix as they are all having their own diagonal. And not just that, they are positioned in a clear pattern on the lower diagonals right under the main diagonal with $\theta_1$ on the first diagonal beneath, $\theta_2$ on the second one beneath and $\theta_3$ on the third. This implies that the same characteristics of $A$ for the $\acs{ARMA}(2,3)$ process might also be generalized to any coefficient matrix $A$ for an $\acs{ARMA}(p,q)$ process.
+
+Consider the formula for $\hat{X}_t$ for $\acs{ARMA}(p,q)$ and imaging to calculate $\hat{X}_t$ for all $t$ from 0 up to the the size of the time series $l$: 
+\begin{equation}\label{eq:ARMA_hat_p_q_full}
+    \begin{array}{rcccc}
+        \hat{X}_{1} &=& 0 \\
+        \hat{X}_{2} &=& \displaystyle\sum_{\substack{i=1 \\ i < 2}}^{p} \phi_i B^i X_{2} &+& \displaystyle\sum_{\substack{k=1 \\ k < 2}}^{q} \theta_k B^k (X_{2}-\hat{X}_{2})\\
+        \hat{X}_{3} &=& \displaystyle\sum_{\substack{i=1 \\ i < 3}}^{p} \phi_i B^i X_{3} &+& \displaystyle\sum_{\substack{k=1 \\ k < 3}}^{q} \theta_k B^k (X_{3}-\hat{X}_{3})\\
+         &\vdots&&&\\
+        \hat{X}_{l-1} &=& \displaystyle\sum_{\substack{i=1 \\ i < (l-1)}}^{p} \phi_i B^i X_{l-1} &+& \displaystyle\sum_{\substack{k=1 \\ k < (l-1)}}^{q} \theta_k B^k (X_{l-1}-\hat{X}_{l-1})\\
+        \hat{X}_{l} &=& \displaystyle\sum_{\substack{i=1 \\ i < l}}^{p} \phi_i B^i X_{l} &+& \displaystyle\sum_{\substack{k=1 \\ k < l}}^{q} \theta_k B^k (X_{l}-\hat{X}_{l})\\
+    \end{array}
+\end{equation}
+
+Notice the second condition of each sum defining that the index $i$ and $k$ are bound by the index of $\hat{X}$. This has only been implicit before because $X_t$ was defined only for $t \in \mathbb{N}^+$ and it was therefore assumed that $\forall t \in \mathbb{Z} \wedge t \leq 0 : B X_t = 0$.
+
+From this form we can now infer that the characteristics found for the matrix $A$ of equation \ref{eq:ARMA_hat_2_3_system_big} are for the most part also the characteristics of any other system of linear equations that is produced by an $\acs{ARMA}(p,q)$ process. In particular these characteristics are:
+\begin{enumerate}
+    \item Main diagonal with constant 1
+    \item Upper triangle is zero
+    \item Lower triangle is non zero
+    \item Non zero values are on the diagonals right below the main diagonal.
+    \item Each diagonal has a constant value
+    \item There are exactly q diagonals filled with non zeros under the main diagonal. Each $\theta_i$ being a constant of one of the diagonals for all $1 \leq i \leq q$
+\end{enumerate}
+
+The first one is quite easy to see by looking at the equations in \ref{eq:ARMA_hat_p_q_full}. Each equation starts with the unknown $\hat{X}_t$ on the left side and no other occurrence of this unknown on the other side. Therefore it doesn't cancel out at any time and keeps its coefficient of $1$. In the transformation to the notation as a matrix equation this therefore translates into the multiplication of the $\vec{\hat{X}}$ vector with $1$ for each equation. Resulting in the main diagonal of $1$s.
+
+Next up is the upper triangle of the matrix. For this to have any non zero value, one of the equations would need to include an unknown $\hat{X}_t$ on the right hand side of the equation with $t$ greater than the $\hat{X}_t$ on the left hand side. Considering the equations this can not be. As any $\hat{X}_t$ on the right hand side exists only in combination with the backshift operator $B^j$ with $j \geq 1$ resulting in any $\hat{X}_t$ to be transformed to $\hat{X}_{t-j}$ with $t-j < t$. Therefore the upper triangle is zero.
+
+The lower triangle on the other hand has non zero values precisely for this reason. That these non zero values are occurring in the distinct patterns that has been described before can be more easily seen when transforming the last equation of \ref{eq:ARMA_hat_p_q_full} into:
+
+\begin{equation}\label{eq:ARMA_hat_p_q_transformed_l}
+    \displaystyle\sum_{\substack{k=1 \\ k < l}}^{q} \theta_k B^k \hat{X}_{l} + \hat{X}_{l} = \displaystyle\sum_{\substack{i=1 \\ i < l}}^{p} \phi_i B^i X_{l} +\displaystyle\sum_{\substack{k=1 \\ k < l}}^{q} \theta_k B^k X_{l}
+\end{equation}
+
+Now the left hand side describes the $l$-th row of the matrix. With a one in the $l$-th column of the $l$-th row and the value of $\theta_k$ in the $l-k$-th column. And because decreasing $l$ by one means that $\theta_k$ shifts one column to the left when compared to the previous row $l$, the pattern that has been described emerges. As there are $q$ different $\theta_k$ there are always exactly $q$ diagonals filled with the values of $\theta_1$ to $\theta_k$ with $\theta_1$ on the first diagonal under the main diagonal, $\theta_2$ on the second and in general with $\theta_k$ on the $k$-th diagonal beneath the main diagonal.
+
+Having shown that the matrix $A$ is indeed a lower triangular matrix with a main diagonal with constant $1$ we can conclude that it is invertible. Furthermore, the matrix is diagonal dominant if $\sum_{k=1}^{q}\theta_k < 1$.
+
+And as mentioned before these properties play an important role in choosing one of the many algorithms that can efficiently solve this system of linear equations. In the second part of this chapter some of these methods will be discussed. Including the \acl{GS}, the \acl{SOR} and the \acl{CG} method as well as the Jacobi and forward substitution method. Additionally there will also be an introduction of a more direct approach, that is calculating the inverse of $A$ to solve the equations.
+
+The \acl{GS} method is an iterative approach, updating the solution matrix $x$ of the linear system of equations $Ax=b$ by solving the equations of the system one at a time. The update formula for the $k$-th approximation of $x$ is:
+
+\begin{equation}\label{eq:Gauss-Seidel_update}
+   x_i^{(k)} = \frac{b_i - \sum_{j<i}a_{i,j}x_j^{(k)}-\sum_{j>i}a_{i,j}x_j^{(k-1)}}{a_{i,i}}
+\end{equation}
+
+For this method, however, the convergence is only proven for matrices that are diagonally dominant, symmetric and positive definite.
+Furthermore, because $x_i^{(k)}$ relies not only on the previous iteration $x^{(k-1)}$ but also on all the components of the same iteration $x_j^{(k)}$ with $j<i$ the updates can not be done simultaneously.\textsuperscript{\cite{BlackGauss-SeidelMethod}}
+Note that $j>i$ of $a_{i,j}$ are the components of the upper triangular and for out system of linear equations this means that the second sum will therefore be zero. Later we will see that for out particular case this makes the update of the \acl{GS} method equal to the update of the Jacobi method.
+
+The \acl{SOR} method is derived from the \acl{GS} method and was proven to be able to converge faster by an order of magnitude.\textsuperscript{\cite{BlackStationaryMethod}} It does this by extrapolating the \acl{GS} method and approximates $x$ by updating $x_i^{(k)}$ with the weighted average of $x_i^{(k-1)}$ and the \acl{GS} iterate $\Bar{x}_i^{(k)}$:
+
+\begin{equation}\label{eq:SOR_update}
+   x_i^{(k)} = \omega \Bar{x}_i^{(k)} + (1-\omega)x_i^{(k-1)}
+\end{equation}
+
+It was shown that choosing an appropriate value for $\omega$ accelerates the rate of convergence. However, it has also been proven that \acl{SOR} fails if $\omega$ is outside the interval $(0,2)$.\textsuperscript{\cite{BlackSuccessiveMethod}} And because the update of the \acl{SOR} method is relying on the calculation of the \acl{GS} iterate $\Bar{x}_i^{(k)}$ it has the same dependencies on the previous components \acl{GS} iterate $\Bar{x}_j^{(k)}$ with $j<i$ and can therefore also not calculate the updates in parallel.
+
+The \acl{CG} method on the other hand is known for its applications in parallel computing. And it can not only be used to solve optimization problems as described in chapter \ref{optimalgorithms} but is also useful for solving systems of linear equations. The convergence matrix, however, needs to be symmetric and positive definite.\textsuperscript{\cite[p.~3]{Rambo2016TheEquations}} And the algorithm is not robust for ill-conditioned systems.\textsuperscript{\cite[p.~19]{Rambo2016TheEquations}} This makes it especially hard to apply the \acs{CG} method to the problem at hand. Because one could argue that even though the coefficient matrix $A$ is not symmetric, a solution vector $x$ could still be found if one were to solve the system $\Bar{A}x=\Bar{b}$ with $\Bar{A} = A^T A$ instead. $\Bar{A}$ would then be symmetric and it can be shown that the solution $x$ stays the same when choosing $\Bar{b}=A^T b$:
+
+\begin{equation}\label{eq:symmetrify_Axb}
+    \begin{array}{lrcllclc}
+       & A x &=& b &&&& \\
+       \Leftrightarrow & A^T A x &=& A^T b &&&& \\
+       \Leftrightarrow & \Bar{A} x &=& \Bar{b} &\wedge& \Bar{A} = A^T A &\wedge& \Bar{b}=A^T b 
+    \end{array}
+\end{equation}
+
+Unfortunately it is not as easy as that. Multiplicating the coefficient matrix $A$ with $A^T$ would result in an ill-conditioned system. If the condition number of $A$ would be $K$ then the condition number of $\Bar{A}$ would be $K^2$. And because the \acl{CG} method is not suited for ill-conditioned systems this approach would fail. 
+
+Even though there are ways to reduce the condition number by introducing a so called preconditioner, the preferred alternative is to use the \acl{Bi-CG} method, which has been developed so the algorithm could also be applied to non-symmetric systems.\textsuperscript{\cite[p.~19]{Rambo2016TheEquations}} However, the trade off for this is a higher numerical instability leading to an explosion in terms of its computation time and that except for a few papers there is now much known about the algorithm.\textsuperscript{\cite[p.~16]{Rambo2016TheEquations}} The next generation in the family of \acs{CG} methods has been the \acl{CGS} method which improved the speed of the algorithm to converge in half the time of \acs{Bi-CG}. This is partially achieved by removing the need to transpose $A$, which is beneficial when dealing with large matrices  or matrices that are not definite. But \acs{CGS} is still not addressing the issues of the numerical instability that the \acl{Bi-CG} introduced and because it is using a squared function there is a build up of rounding and overflow errors.\textsuperscript{\cite[p.~19]{Vinay2016UnderstandingBi-CGSTAB}} Fortunately, these issues have been mostly addressed by the newest member of \acs{CG} family: The \acl{Bi-CGSTAB} method that was published in 1992. It is introducing a smoothing function that attempts to reduce the spikes of the \acs{CGS} method and by doing so stabilizing the \acs{Bi-CG} method while retaining the speed of the \acs{CGS} algorithm.\textsuperscript{\cite[p.~19]{Vinay2016UnderstandingBi-CGSTAB}}
+
+Another algorithm that is commonly used when in need of a parallel solver for systems of linear equations is the Jacobi method. It is similar to the \acl{GS} method in terms of its update formula:
+
+\begin{equation}\label{eq:jacobi_update}
+	\begin{array}{lrcl}
+		x_i^{(n+1)}  = \frac{1}{a_{ii}} (b_i - \displaystyle\sum_{\substack{j=1 \\ j\neq i}} a_{ij} \cdot x_j^{(n)})
+	\end{array}
+\end{equation}
+
+But in contrast to the \acl{GS} or \acl{SOR} method its update $x_i^{(n)}$ is independent of all other $x_i^{(n)}$. The drawback is that for non parallel application it converges slower than the \acl{GS} method. A big advantage, however, when compared to the other algorithms is it's simplicity and robustness: The update method can be derived just from the matrix form of the system of linear equations in a few steps:\textsuperscript{\cite[p.~133]{Stroetmann2017IterativeGleichungs-Systeme}}
+ 
+\begin{equation}\label{eq:derived_jacobi}
+	\begin{array}{lrcl}
+		&\displaystyle\sum_{j=1}^{n} a_{ij} \cdot x_j &=& b_i\\
+        \Leftrightarrow & a_{ii} \cdot x_i + \displaystyle\sum_{\substack{j=1 \\ j\neq i}} a_{ij} \cdot x_j &=& b_i\\
+        \Leftrightarrow & a_{ii} \cdot x_i  &=& b_i - \displaystyle\sum_{\substack{j=1 \\ j\neq i}} a_{ij} \cdot x_j\\
+        \Leftrightarrow & x_i  &=& \frac{1}{a_{ii}} (b_i -  \displaystyle\sum_{\substack{j=1 \\ j\neq i}} a_{ij} \cdot x_j)
+	\end{array}
+\end{equation}
+
+In matrix form the Jacobi update can be expressed by assuming that $A=D+R$ where $D$ is the main diagonal of $A$ and $R$ is the remainder:
+\begin{equation}\label{eq:jacobi_update_matrix}
+	x^{(n+1)} = D^{-1} (b - R x^{(n)})
+\end{equation}
+
+It has been proven that Jacobi converges for any system which coefficient matrix is diagonally dominant.\textsuperscript{\cite[p.~16]{JohnChapterSchemes}} Fortunately for us this is only a sufficient but not necessary condition and it has also been shown that the method converges if the spectral radius of the iteration matrix $D^{-1} R$ is less than 1. \textsuperscript{\cite[p.~12]{JohnChapterSchemes}} The spectral radius of a matrix $A$ is defined by:
+\begin{equation}\label{eq:spectral_radius}
+	\rho(A)=max\{|\lambda| : \lambda \textrm{ is eigenvalue of } A\}
+\end{equation}
+
+In the case of the linear system of the $\acs{ARMA}(p,q)$ process, the spectral radius of the iterative matrix is indeed smaller than one because it can be shown that $\rho(D^{-1} R)= 0$. This is because R is actually a strictly lower triangular matrix, meaning its a triangular matrix with zeros on the main diagonal. Because of this the characteristic polynomial is $\mathcal{P}_R (\lambda)=\lambda^n$ for $R \in \mathbb{R}^{n \times n}$ and therefore all Eigenvalues $\lambda_i$ are 0. Then obviously $max\{|\lambda| : \lambda \textrm{ is eigenvalue of } A\}$ is also zero, which proves that the Jacobian method converges for all linear systems of the $\acs{ARMA}(p,q)$ process.
+
+Another approach that is also used to solve linear systems is the LU factorization or LU decomposition. The idea is to represent $A$ by the product of two matrices $L$ and $U$ that are both triangular matrices. $L$ a lower triangular matrix and $U$ an upper triangular matrix. This method leverages the unique properties that systems with triangular coefficients bring to the table: They can be solved directly by substituting the unknown $x_n$ of the $(n+1)$-th equation with the solution acquired by solving the $n$-th equation. This is only possible because the $n$-th equation does not rely on any $x_i$ where $i \geq n$:
+
+\begin{equation}\label{eq:triangular_linsystem}
+    \begin{array}{ccccccccc}
+        l_{1,1} x_1 &&&&&& &=& b_1 \\
+        l_{2,1} x_1 &+& l_{2,2} x_2 &&&& &=& b_2 \\
+        \vdots && \vdots && \ddots && &&  \vdots\\
+        l_{m,1} x_1 &+& l_{m,2} x_2 &+& \ldots&+& l_{m,m} x_m &=& b_m \\
+    \end{array}
+\end{equation}
+
+In this form it is obvious that the solution to the first equation is trivial and $x_1 = \frac{b_1}{l_{1,1}}$, making it also trivial to solve the second equation with $x_2 = \frac{b_1 - l_{2,1} x_1}{l_{1,1}}$ as $x_1$ is not an unknown anymore. This process of substituting all the unknowns $x_i$ except for one can be continued for all the equations up to the last one by using the formula: 
+\begin{equation}\label{eq:forwardsub_k}
+   x_k = \frac{b_k - \sum_{i=1}^{k-1} l_{k,i} x_i}{l_{k,k}}
+\end{equation}
+
+This method of solving a system of linear equations is called forward substitution and has as its only condition that $A$ is a lower triangular matrix. The counter part of this method for upper triangular systems is called backward substation and as the name suggests it works analogue to the forward substitution method, but instead of starting with the first equation and iterating forward, it is starting with the last equation and iterates backwards. The biggest advantage of this algorithm is that it is relatively fast and only has a quadratic complexity in terms of multiplication and subtraction operations. Unfortunately none of the calculations can be done simultaneously. 
+
+The last alternative that is going to be discussed in this chapter is one that might also be considered the most obvious: Considering the system of linear equations $Ax=b$ the straight forward approach would be to calculate $x$ by multiplying b with the inverse of $A$. This is generally considered to be a inefficient approach, because the complexity of inverting a matrix is known to be $O(n^3)$ using standard techniques. But in contrast to some of the other methods this approach can be parallelized and might therefore still be a viable option. Consider the the definition of the inverse of a squared matrix:
+\begin{definition}
+    The matrix $B \in \mathbb{R}^{n \times n}$ is the inverse of the matrix $A \in \mathbb{R}^{n \times n}$ if and only if $A B = I_n$ where $I_n$ is the identity matrix $I_n \in \mathbb{R}^{n \times n}$ 
+\end{definition}
+
+And assume that $A$ and $B$ are lower triangular matrices and define them as $2 \times 2$ matrices constructed by $A_{1,1}, B_{1,1} \in \mathbb{R}^{k \times k}$, $A_{2,1}, B_{2,1} \in \mathbb{R}^{l \times k}$ and $A_{2,2}, B_{2,2} \in \mathbb{R}^{l \times l}$ with $l+k=n$ then the equation defining the inverse of $A$ can be expressed as
+
+\begin{equation}\label{eq:derive_recursive_inversion_1}
+   \left(\begin{array}[c]{cc}
+        A_{1,1} & 0\\
+        A_{2,1} & A_{2,2}
+    \end{array}\right) 
+    \left(\begin{array}[c]{cc}
+        B_{1,1} & 0\\
+        B_{2,1} & B_{2,2}
+    \end{array}\right) 
+    = 
+    \left(\begin{array}[c]{cc}
+        A_{1,1} B_{1,1} & 0\\
+        A_{2,1} B_{1,1} + A_{2,2} B_{2,1} & A_{2,2} B_{2,2}
+    \end{array}\right) 
+    = 
+    \left(\begin{array}[c]{cc}
+        1 & 0\\
+        0 & 1
+    \end{array}\right)
+\end{equation}
+
+Considering the blockwise multiplication the following three equations can be derived:
+\begin{equation}\label{eq:derive_recursive_inversion_2}
+    \begin{array}[c]{ccccc}
+        A_{1,1} B_{1,1} && &=& 1 \\
+        A_{2,2} B_{2,2} && &=& 1 \\
+        A_{2,1} B_{1,1} &+& A_{2,2} B_{2,1} &=& 0
+    \end{array}
+\end{equation}
+
+Solving these gives the following formulas for $B$:
+\begin{equation}\label{eq:derive_recursive_inversion_3}
+    \begin{array}[c]{ccc}
+        B_{1,1} &=& A_{1,1}^{-1}\\
+        B_{2,2} &=& A_{2,2}^{-1} \\
+        B_{2,1} &=& - B_{2,2} A_{2,1} B_{1,1}
+    \end{array}
+\end{equation}
+
+Assuming that we have already inverted $A_{1,1}$ and $A_{2,2}$ recursively means that we can also calculating $B_{2,1}$ and by doing so calculating the last missing part of B, the inverse of $A$. Note that when recursively calculating $A_{i,i}$ at one point $A$ will be a $1 \times 1$ matrix and the inverse $B$ can simply be calculated by inverting the scalar $A_{1,1}$. And obviously every time the matrix $A$ gets divided and the inverse of $A_{1,1}$ and $A_{2,2}$ is supposed to be calculated, they can be calculated independently of each other, allowing for a huge portion of the computation to be parallelized.
+
+Now, to recap what has been introduced in this chapter: There are six different approaches for solving a system of linear equation that have been discussed so far. Three of them, the \acl{GS}, the \acl{SOR} and the forward substitution method are all not parallelizable. Each of them is supposed to be faster than any of the other three methods, but when it comes to solving large systems of linear equations the solvers that can distribute their work load on multiple instances ought to be ahead in terms of computation time. And these are the \acl{Bi-CGSTAB} method, the Jacobi method and the recursive inversion approach.
+
+
+\section{SystemML}\label{systemml}
+SystemML is a Machine Learning Platform built for large scale analytics. It enables flexible and scalable machine learning while also accelerating exploratory algorithm development. 
+It accomplishes this by providing the \acl{DML} (\acs{DML}). It can either be written in the default R-Like ("DML") or a Python-Like ("PyDML") syntax.\textsuperscript{\cite{SystemMLDocumentation}}
+The goal of SystemML is to automatically scale any algorithm by translating all the instructions of a \acs{DML} script into a set of \textit{Spark} \acs{API} calls so it can be run on a cluster in multiple nodes if necessary. Beforehand, SystemML also uses code optimization methods to remove dead code and common sub expressions. \textsuperscript{\cite[p.~52]{Boehm2014SystemMLsPrograms}}
+
+Each script is optimized based on data and cluster characteristics, which means that the code is not only compiled and optimized once, but instead every time a script is invoked. Only at that point, all parameters the script can be run with are known and therefore the sizes and characteristics of the matrices (data) used in the script can be calculated. Using this information combined with other static characteristics of the cluster the script can be optimized further by, for example, calculating the number of nodes needed to run the script.\textsuperscript{\cite[p.~52]{Boehm2014SystemMLsPrograms}}
+
+
+SystemML does this by translating a \acs{DML} script through a series of transformations and rewrites into an executable program that can run in parallel on Spark or Hadoop. The script is taken through different layers of a well defined compilation chain that transforms it using 3 internal representations.
+The first representation being used, is a generic syntax tree that describes the original program. This representation is obtained by using parser that was produced by a parser generator that creates a parser based on a grammar describing either the R-like DML or Python-Like PyDML language. The script is parsed into the hierarchical representation of statement blocks. This step is responsible for a lexical and syntactical analysis. Afterwards a classical live variable analysis can be done as well as removal of dead code and then a semantical analysis checks for mandatory parameters of built-in functions.
+
+At the end of the so called language layers, basic statement blocks have been identified. These basic blocks are chunk of straight line code (multiple lines) in between branches and for each of those blocks \acl{DAG} (\acs{DAG}s) of \acl{HOP}s (\acs{HOP}s) are created. These graphs are a representation of the data flow describing logical operations with their data dependencies and outputs.
+To be able to optimize the program to run it in parallel one needs to know the characteristics of the data dependencies. And as the data in the machine learning domain typically comes in form of matrices SystemML computes the dimensions and the sparsity of the matrices for each \acl{HOP}. These statistics are then propagated upwards to all the intermediate results - nodes of the \acl{DAG} of \acs{HOP}s - and can then be used to determine whether a specific basic block can be calculated on a single node or can (or needs to) be distributed onto multiple ones. 
+Additionally to determining the distributed operations, the \acs{HOP}s layers are also responsible for rewrites of logical operations. These rewrite include algebraic simplifications, mandatory format conversions, common subexpression elimination and many more. 
+
+The third and final representation is derived by translating the \acs{HOP}s \acs{DAG}s into \acl{LOP}s (\acs{LOP}s) \acs{DAG}s which can then be used to generate run-time plans. In \acs{LOP} \acs{DAG}s each node represents a physical operation instead of a logical one, which, depending on the analysis of the \acs{HOP}s \acs{DAG}s, are either chosen to optimize parallel computing or in-memory computing one cluster node.
+Each \acl{LOP} is runtime-backed-specific and SystemML offers the use of three different run-time environments. Therefore \acs{DML} and PyDML scripts can be run in different modes. Either in Spark, Hadoop or Standalone mode (\acs{JVM}). Additionally it can also be accessed via Scala or Python to be used in a Spark Shell, Jupyter or Zeppelin notebook. This enables easy and fast algorithm development in well established development environments commonly used for Machine Learning applications.\textsuperscript{\cite[p.~54-56]{Boehm2014SystemMLsPrograms}}
+
